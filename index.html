@@ -7,9 +7,19 @@
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
-  <header class="site-header">
-    <h1>Álbum Mundial 2026</h1>
-    <nav>
+  <header class="site-header" role="banner">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <!-- simple soccer ball icon -->
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="#fff" stroke="#0b6efd" stroke-width="1.2"/>
+          <path d="M12 2.5v4M12 21.5v-4M2.5 12h4M21.5 12h-4" stroke="#0b6efd" stroke-width="1"/>
+        </svg>
+      </div>
+      <h1>Álbum Mundial <span class="year">2026</span></h1>
+    </div>
+
+    <nav class="top-nav" role="navigation" aria-label="Navegación principal">
       <button id="btn-album" class="nav-btn" aria-pressed="true">Álbum</button>
       <button id="btn-open-pack" class="nav-btn">Abrir Sobre</button>
       <button id="btn-duplicates" class="nav-btn">Repetidas (<span id="dup-count">0</span>)</button>
@@ -17,7 +27,7 @@
     </nav>
   </header>
 
-  <main id="app" class="main">
+  <main id="app" class="main" role="main">
     <!-- Album view -->
     <section id="album-view" class="view active" aria-labelledby="btn-album">
       <div class="album-grid" id="album-grid" role="list" aria-label="Páginas del álbum por selección">
@@ -30,16 +40,16 @@
       <div class="pack-area">
         <div class="pack-instructions">
           <p>Presiona "Abrir Sobre" en la cabecera o aquí para recibir 7 barajitas aleatorias.</p>
-          <button id="open-pack-btn" class="primary">Abrir Sobre (7)</button>
+          <button id="open-pack-btn" class="primary large">Abrir Sobre (7)</button>
         </div>
-        <div id="last-pack" class="last-pack"></div>
+        <div id="last-pack" class="last-pack" aria-live="polite"></div>
       </div>
     </section>
 
     <!-- Duplicates -->
     <section id="duplicates-view" class="view" aria-labelledby="btn-duplicates">
       <h2>Mis Repetidas</h2>
-      <div id="duplicates-list" class="stickers-grid"></div>
+      <div id="duplicates-list" class="stickers-grid" role="list"></div>
     </section>
 
     <!-- Trades -->
@@ -70,23 +80,26 @@
 
         <div class="panel">
           <h3>Ofertas entrantes</h3>
-          <div id="incoming-offers" class="offers-list"></div>
+          <div id="incoming-offers" class="offers-list" role="list"></div>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- Pack modal / animation area (simple) -->
+  <!-- Pack modal / animation area -->
   <div id="pack-modal" class="modal hidden" role="dialog" aria-hidden="true" aria-labelledby="modal-title">
     <div class="modal-inner">
       <h3 id="modal-title">Abriste un sobre</h3>
       <div id="pack-items" class="stickers-row"></div>
       <div class="modal-actions">
         <button id="accept-pack" class="primary">Agregar al álbum</button>
-        <button id="discard-pack">Cerrar</button>
+        <button id="discard-pack" class="ghost">Cerrar</button>
       </div>
     </div>
   </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
   <template id="sticker-template">
     <article class="sticker-card" role="listitem">

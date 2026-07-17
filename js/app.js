@@ -1,4 +1,4 @@
-// Entrada principal de la SPA.
+// Entrada principal de la SPA con mejoras UI (animaciones y toasts)
 // Usa módulos: mockData.js y api.js
 import { countries, allStickers } from './mockData.js';
 import { api } from './api.js';
@@ -24,6 +24,8 @@ const desiredSelect = document.getElementById('desired-select');
 const sendOfferBtn = document.getElementById('send-offer');
 const incomingOffers = document.getElementById('incoming-offers');
 
+const toastContainer = document.getElementById('toast-container');
+
 let state = null;
 let currentPack = [];
 
@@ -45,7 +47,7 @@ function makeStickerElement(sticker, opts={}){
   const tmpl = document.getElementById('sticker-template');
   const node = tmpl.content.firstElementChild.cloneNode(true);
   const img = node.querySelector('.sticker-img');
-  img.src = sticker.image;
+  img.src = sticker.image || 'assets/silhouette.svg';
   img.alt = sticker.nombre;
   node.querySelector('.sticker-caption').textContent = sticker.nombre;
   node.querySelector('.sticker-id').textContent = sticker.id;
@@ -75,12 +77,12 @@ function renderAlbum(){
       if(owned){
         slot.classList.add('sticker-placed');
         const img = document.createElement('img');
-        img.src = s.image;
+        img.src = s.image || 'assets/silhouette.svg';
         img.alt = s.nombre;
         slot.appendChild(img);
       } else {
         const img = document.createElement('img');
-        img.src = s.image;
+        img.src = s.image || 'assets/silhouette.svg';
         img.alt = 'vacía';
         img.className = 'sticker-empty';
         slot.appendChild(img);
@@ -92,11 +94,6 @@ function renderAlbum(){
         badge.style.position='absolute';
         badge.style.bottom='6px';
         badge.style.right='6px';
-        badge.style.background='rgba(0,0,0,0.6)';
-        badge.style.color='white';
-        badge.style.fontSize='0.7rem';
-        badge.style.padding='2px 6px';
-        badge.style.borderRadius='999px';
         slot.appendChild(badge);
       }
       grid.appendChild(slot);
@@ -131,12 +128,18 @@ document.getElementById('open-pack-btn').addEventListener('click', ()=>openPackB
 
 function showPackModal(pack){
   packItems.innerHTML='';
-  for(const s of pack){
+  // add items with staggered animation
+  for(let i=0;i<pack.length;i++){
+    const s = pack[i];
     const el = makeStickerElement(s);
+    el.classList.add('pack-item');
+    // stagger using inline style animation delay
+    el.style.animationDelay = `${i * 80}ms`;
     packItems.appendChild(el);
   }
   packModal.classList.remove('hidden');
   packModal.setAttribute('aria-hidden','false');
+  showToast('Abriste un sobre', {duration: 1800});
 }
 
 discardPackBtn.addEventListener('click', ()=>{
@@ -165,6 +168,7 @@ acceptPackBtn.addEventListener('click', ()=>{
   populateTradeSelectors();
   packModal.classList.add('hidden');
   packModal.setAttribute('aria-hidden','true');
+  showToast('Sobre agregado al álbum', {duration:2000});
 });
 
 // Duplicates view
@@ -181,6 +185,7 @@ function renderDuplicates(){
     badge.textContent = `Repetidas: ${count}`;
     badge.style.fontSize='0.75rem';
     badge.style.color='var(--muted)';
+    badge.style.marginLeft='6px';
     meta.appendChild(badge);
     duplicatesList.appendChild(card);
   }
@@ -228,7 +233,7 @@ sendOfferBtn.addEventListener('click', async ()=>{
   const offeredId = myDuplicateSelect.value;
   const desiredId = desiredSelect.value;
   const toGroup = document.getElementById('target-group').value;
-  if(!offeredId || !desiredId){ alert('Selecciona ofrecida y deseada'); return; }
+  if(!offeredId || !desiredId){ showToast('Selecciona ofrecida y deseada', {type:'danger'}); return; }
   const res = await api.sendOffer({ fromApiKey: state.apiKey, toGroup, offeredId, desiredId });
   // Simular que la oferta se envía y se consume localmente
   appendIncomingOffer(res.offer); // en mock lo veremos como entrada también
@@ -236,6 +241,7 @@ sendOfferBtn.addEventListener('click', async ()=>{
   api.saveState(state);
   renderDuplicates();
   populateTradeSelectors();
+  showToast('Oferta enviada', {duration:1800});
 });
 
 // Incoming offers list (mock)
@@ -247,7 +253,7 @@ function appendIncomingOffer(offer){
   </div>`;
   const actions = document.createElement('div');
   const accept = document.createElement('button'); accept.textContent='Aceptar'; accept.className='primary';
-  const reject = document.createElement('button'); reject.textContent='Rechazar';
+  const reject = document.createElement('button'); reject.textContent='Rechazar'; reject.className='ghost';
   actions.appendChild(accept); actions.appendChild(reject);
   item.appendChild(actions);
   incomingOffers.prepend(item);
@@ -255,7 +261,7 @@ function appendIncomingOffer(offer){
   accept.addEventListener('click', ()=>{
     // Simular aceptar: intercambiar si posible
     if(!state.duplicates[offer.offeredId] || state.duplicates[offer.offeredId]<=0){
-      alert('No tienes esa repetida para aceptar (mock).');
+      showToast('No tienes esa repetida para aceptar (mock).', {type:'danger'});
       return;
     }
     // hacer swap: restar repetida, marcar desiredId como placed (si no está)
@@ -274,33 +280,43 @@ function appendIncomingOffer(offer){
     renderAlbum();
     renderDuplicates();
     item.remove();
-    alert('Intercambio aceptado (mock).');
+    showToast('Intercambio aceptado (mock).', {type:'success'});
   });
 
   reject.addEventListener('click', ()=>{
     item.remove();
+    showToast('Oferta rechazada', {duration:1200});
   });
 }
 
 /* ---------- Fake Socket (simulación de eventos en vivo) ---------- */
-/* Cuando tengas Socket.IO real, reemplaza esta lógica por:
-   import { io } from "socket.io-client";
-   const socket = io(API_URL, { auth: { apiKey: state.apiKey } });
-   socket.on('offer', handleOffer);
-*/
 function startFakeSocket(){
-  // cada 20-45s simula una oferta entrante hacia este usuario
   setInterval(()=>{
-    // crear offer mock
     const allIds = Object.keys(allStickers);
     const offeredId = allIds[Math.floor(Math.random()*allIds.length)];
-    // desired: intenta elegir una faltante real
     const missingList = [];
     for(const c of countries) missingList.push(...state.album[c.code].missing);
     const desiredId = missingList.length ? missingList[Math.floor(Math.random()*missingList.length)] : allIds[Math.floor(Math.random()*allIds.length)];
     const offer = { id:`IN-${Date.now()}`, from:'Grupo-Mock', to:state.apiKey, offeredId, desiredId, status:'pending' };
     appendIncomingOffer(offer);
+    showToast('Nueva oferta entrante', {duration:1400});
   }, 30000 + Math.random()*15000);
+}
+
+/* ---------- Toasts ---------- */
+function showToast(message, opts={}){
+  const t = document.createElement('div');
+  t.className = 'toast';
+  if(opts.type==='danger'){
+    t.style.background = 'linear-gradient(90deg,#ef4444,#dc2626)';
+  } else if(opts.type==='success'){
+    t.style.background = 'linear-gradient(90deg,#16a34a,#059669)';
+  }
+  t.textContent = message;
+  toastContainer.appendChild(t);
+  const duration = opts.duration || 2500;
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateY(10px)'; }, duration);
+  setTimeout(()=>{ t.remove(); }, duration + 380);
 }
 
 /* ---------- Utilities (pequeñas helpers extra) ---------- */
