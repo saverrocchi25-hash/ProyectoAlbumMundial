@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Álbum Mundial 2026 — Mock</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>Álbum Mundial 2026</h1>
+    <nav>
+      <button id="btn-album" class="nav-btn" aria-pressed="true">Álbum</button>
+      <button id="btn-open-pack" class="nav-btn">Abrir Sobre</button>
+      <button id="btn-duplicates" class="nav-btn">Repetidas (<span id="dup-count">0</span>)</button>
+      <button id="btn-trades" class="nav-btn">Mercado</button>
+    </nav>
+  </header>
+
+  <main id="app" class="main">
+    <!-- Album view -->
+    <section id="album-view" class="view active" aria-labelledby="btn-album">
+      <div class="album-grid" id="album-grid" role="list" aria-label="Páginas del álbum por selección">
+        <!-- Renders country cards -->
+      </div>
+    </section>
+
+    <!-- Pack opening -->
+    <section id="pack-view" class="view" aria-labelledby="btn-open-pack">
+      <div class="pack-area">
+        <div class="pack-instructions">
+          <p>Presiona "Abrir Sobre" en la cabecera o aquí para recibir 7 barajitas aleatorias.</p>
+          <button id="open-pack-btn" class="primary">Abrir Sobre (7)</button>
+        </div>
+        <div id="last-pack" class="last-pack"></div>
+      </div>
+    </section>
+
+    <!-- Duplicates -->
+    <section id="duplicates-view" class="view" aria-labelledby="btn-duplicates">
+      <h2>Mis Repetidas</h2>
+      <div id="duplicates-list" class="stickers-grid"></div>
+    </section>
+
+    <!-- Trades -->
+    <section id="trades-view" class="view" aria-labelledby="btn-trades">
+      <h2>Mercado de Intercambios (Simulado)</h2>
+      <div class="trades-layout">
+        <div class="panel">
+          <h3>Proponer intercambio</h3>
+          <p>Selecciona una repetida tuya y una barajita que te haga falta (mock).</p>
+          <div class="form-row">
+            <label>Mi repetida</label>
+            <select id="my-duplicate-select"></select>
+          </div>
+          <div class="form-row">
+            <label>Quiero</label>
+            <select id="desired-select"></select>
+          </div>
+          <div class="form-row">
+            <label>Grupo destino (mock)</label>
+            <select id="target-group">
+              <option value="grupoA">Grupo A</option>
+              <option value="grupoB">Grupo B</option>
+              <option value="grupoC">Grupo C</option>
+            </select>
+          </div>
+          <button id="send-offer" class="primary">Enviar Oferta</button>
+        </div>
+
+        <div class="panel">
+          <h3>Ofertas entrantes</h3>
+          <div id="incoming-offers" class="offers-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Pack modal / animation area (simple) -->
+  <div id="pack-modal" class="modal hidden" role="dialog" aria-hidden="true" aria-labelledby="modal-title">
+    <div class="modal-inner">
+      <h3 id="modal-title">Abriste un sobre</h3>
+      <div id="pack-items" class="stickers-row"></div>
+      <div class="modal-actions">
+        <button id="accept-pack" class="primary">Agregar al álbum</button>
+        <button id="discard-pack">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <template id="sticker-template">
+    <article class="sticker-card" role="listitem">
+      <figure>
+        <img alt="" class="sticker-img" />
+        <figcaption class="sticker-caption"></figcaption>
+      </figure>
+      <div class="sticker-meta">
+        <small class="sticker-id"></small>
+        <span class="sticker-role"></span>
+      </div>
+    </article>
+  </template>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
