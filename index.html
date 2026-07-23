@@ -10,7 +10,6 @@
   <header class="site-header" role="banner">
     <div class="brand">
       <div class="logo" aria-hidden="true">
-        <!-- simple soccer ball icon -->
         <svg width="36" height="36" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle cx="12" cy="12" r="10" fill="#fff" stroke="#0b6efd" stroke-width="1.2"/>
           <path d="M12 2.5v4M12 21.5v-4M2.5 12h4M21.5 12h-4" stroke="#0b6efd" stroke-width="1"/>
@@ -33,6 +32,15 @@
       <div class="album-grid" id="album-grid" role="list" aria-label="Páginas del álbum por selección">
         <!-- Renders country cards -->
       </div>
+    </section>
+
+    <!-- Country detailed view (one selection at a time) -->
+    <section id="country-view" class="view" aria-labelledby="btn-album">
+      <div class="country-detail-header">
+        <button id="btn-back-to-album" class="ghost">← Volver al álbum</button>
+        <h2 id="country-detail-title"></h2>
+      </div>
+      <div id="country-grid" class="country-grid"></div>
     </section>
 
     <!-- Pack opening -->

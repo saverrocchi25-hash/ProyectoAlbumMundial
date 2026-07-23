@@ -1,9 +1,11 @@
-// Entrada principal de la SPA con mejoras UI (animaciones y toasts)
-// Usa módulos: mockData.js y api.js
-import { countries, allStickers } from './mockData.js';
+// js/app.js
+// UI layer with country-detail view: when clicking a country card, opens a focused view for that selection.
+// Uses API data as source of truth for names/roles and does not mutate API/mock objects.
+
+import { allStickers } from './mockData.js';
 import { api } from './api.js';
 
-// Elementos UI
+/* UI elements */
 const albumGrid = document.getElementById('album-grid');
 const btnAlbum = document.getElementById('btn-album');
 const btnOpenPack = document.getElementById('btn-open-pack');
@@ -16,7 +18,6 @@ const packItems = document.getElementById('pack-items');
 const acceptPackBtn = document.getElementById('accept-pack');
 const discardPackBtn = document.getElementById('discard-pack');
 const openPackBtn = document.getElementById('open-pack-btn');
-const lastPack = document.getElementById('last-pack');
 
 const duplicatesList = document.getElementById('duplicates-list');
 const myDuplicateSelect = document.getElementById('my-duplicate-select');
@@ -26,77 +27,169 @@ const incomingOffers = document.getElementById('incoming-offers');
 
 const toastContainer = document.getElementById('toast-container');
 
+const countryView = document.getElementById('country-view');
+const countryGrid = document.getElementById('country-grid');
+const countryTitle = document.getElementById('country-detail-title');
+const backToAlbumBtn = document.getElementById('btn-back-to-album');
+
 let state = null;
 let currentPack = [];
+let catalogByApiCountry = {};
+let catalogCardByMockId = {};
 
-// Navigation
-btnAlbum.addEventListener('click', ()=>showView('album-view', btnAlbum));
-btnOpenPack.addEventListener('click', ()=>showView('pack-view', btnOpenPack));
-btnDuplicates.addEventListener('click', ()=>showView('duplicates-view', btnDuplicates));
-btnTrades.addEventListener('click', ()=>showView('trades-view', btnTrades));
-
-function showView(id, btn){
-  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-  document.querySelectorAll('.nav-btn').forEach(b=>b.setAttribute('aria-pressed','false'));
-  if(btn) btn.setAttribute('aria-pressed','true');
+/* Helpers */
+function showToast(msg, opts={}) {
+  const t = document.createElement('div'); t.className='toast';
+  if (opts.type==='danger') t.style.background = 'linear-gradient(90deg,#ef4444,#dc2626)';
+  if (opts.type==='success') t.style.background = 'linear-gradient(90deg,#16a34a,#059669)';
+  t.textContent = msg; toastContainer && toastContainer.appendChild(t);
+  setTimeout(()=>t.remove(), opts.duration || 2200);
+}
+function apiCodeToMockId(apiCode) {
+  if (!apiCode) return apiCode;
+  const parts = apiCode.split('-'); const country = parts[0]; const num = parseInt(parts[1],10);
+  if (Number.isNaN(num)) return apiCode;
+  if (num===1) return `${country}-00`;
+  return `${country}-${String(num-1).padStart(2,'0')}`;
+}
+function getFullName(card) {
+  if (!card) return null;
+  if (card.fullName) return card.fullName;
+  if (card.playerName) return card.playerName;
+  if (card.name) return card.name;
+  if (card.firstName || card.lastName) return `${card.firstName||''}${card.firstName && card.lastName ? ' ' : ''}${card.lastName||''}`.trim();
+  return card.code || card.id || '';
 }
 
-// Template helpers
-function makeStickerElement(sticker, opts={}){
+/* Early functions */
+function showView(id, btn) {
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  const view = document.getElementById(id);
+  if (view) view.classList.add('active');
+  document.querySelectorAll('.nav-btn').forEach(b=>b.setAttribute('aria-pressed','false'));
+  if (btn) btn.setAttribute('aria-pressed','true');
+  if (id==='album-view') renderAlbum();
+  if (id==='duplicates-view') renderDuplicates();
+}
+function updateDupCount(){ const total = Object.values(state.duplicates||{}).reduce((a,b)=>a+b,0); if (dupCountSpan) dupCountSpan.textContent = String(total); }
+
+/* Template helper (uses API card if available) */
+function makeStickerElement(displayObj, opts={}) {
   const tmpl = document.getElementById('sticker-template');
+  const apiCard = catalogCardByMockId[displayObj.id] || (displayObj.raw) || null;
+  const name = getFullName(apiCard) || displayObj.nombre || (allStickers[displayObj.id] && allStickers[displayObj.id].nombre) || displayObj.id;
+  const role = apiCard && apiCard.role ? apiCard.role : (displayObj.role || displayObj.rol || (allStickers[displayObj.id] && allStickers[displayObj.id].rol) || '');
+  if (!tmpl) {
+    const w = document.createElement('div'); w.className='sticker-card';
+    const img = document.createElement('img'); img.src = displayObj.image || (apiCard && (apiCard.imageUrl||apiCard.image)) || 'assets/silhouette.svg'; img.className='sticker-img';
+    const cap = document.createElement('div'); cap.className='sticker-caption'; cap.textContent = name; cap.title = name;
+    const meta = document.createElement('div'); meta.className='sticker-meta';
+    const idSpan = document.createElement('small'); idSpan.className='sticker-id'; idSpan.textContent = displayObj.id || '';
+    const roleSpan = document.createElement('span'); roleSpan.className='sticker-role'; roleSpan.textContent = role;
+    meta.appendChild(idSpan); meta.appendChild(roleSpan);
+    w.appendChild(img); w.appendChild(cap); w.appendChild(meta);
+    if (opts.large) { w.classList.add('large'); }
+    if (opts.small) w.classList.add('small');
+    return w;
+  }
   const node = tmpl.content.firstElementChild.cloneNode(true);
-  const img = node.querySelector('.sticker-img');
-  img.src = sticker.image || 'assets/silhouette.svg';
-  img.alt = sticker.nombre;
-  node.querySelector('.sticker-caption').textContent = sticker.nombre;
-  node.querySelector('.sticker-id').textContent = sticker.id;
-  node.querySelector('.sticker-role').textContent = sticker.rol || '';
-  if(opts.small) node.classList.add('small');
+  node.querySelector('.sticker-img').src = displayObj.image || (apiCard && (apiCard.imageUrl||apiCard.image)) || 'assets/silhouette.svg';
+  const caption = node.querySelector('.sticker-caption');
+  caption.textContent = name; caption.title = name;
+  node.querySelector('.sticker-id').textContent = displayObj.id || '';
+  node.querySelector('.sticker-role').textContent = role || '';
+  if (opts.large) node.classList.add('large');
+  if (opts.small) node.classList.add('small');
   return node;
 }
 
-// Render album grid (country cards)
-function renderAlbum(){
+/* Render album: each country card header clickable -> showCountry(apiCode) */
+function renderAlbum() {
+  if (!albumGrid) return;
   albumGrid.innerHTML = '';
-  for(const c of countries){
-    const card = document.createElement('section');
-    card.className = 'country-card';
+
+  const countryKeys = Object.keys(state.album || {});
+  countryKeys.sort((a,b)=> {
+    const an = (catalogByApiCountry[a] && (catalogByApiCountry[a].name||catalogByApiCountry[a].country))||a;
+    const bn = (catalogByApiCountry[b] && (catalogByApiCountry[b].name||catalogByApiCountry[b].country))||b;
+    return an.localeCompare(bn);
+  });
+
+  for (const apiC of countryKeys) {
+    const apiCountryObj = catalogByApiCountry[apiC] || {};
+    const displayName = apiCountryObj.name || apiCountryObj.country || apiC;
+    const card = document.createElement('section'); card.className='country-card';
     const header = document.createElement('h3');
-    header.textContent = `${c.name} (${c.code})`;
+    header.innerHTML = `${displayName} <small class="api-code">(${apiC})</small>`;
+    header.classList.add('country-card-header');
+    // Add a clickable button to view selection
+    const viewBtn = document.createElement('button');
+    viewBtn.className = 'nav-btn small';
+    viewBtn.textContent = 'Ver selección';
+    viewBtn.addEventListener('click', (ev)=>{ ev.stopPropagation(); showCountry(apiC); });
+    header.appendChild(viewBtn);
+
+    // Also allow clicking header itself
+    header.addEventListener('click', ()=> showCountry(apiC));
+
     card.appendChild(header);
 
-    const grid = document.createElement('div');
-    grid.className = 'stickers-grid';
-    // for each sticker slot
-    for(const s of c.stickers){
-      const slot = document.createElement('div');
-      slot.className = 'sticker-slot';
-      const owned = state.album[c.code].placed.includes(s.id);
-      const copies = state.duplicates[s.id] || 0;
-      if(owned){
-        slot.classList.add('sticker-placed');
-        const img = document.createElement('img');
-        img.src = s.image || 'assets/silhouette.svg';
-        img.alt = s.nombre;
-        slot.appendChild(img);
-      } else {
-        const img = document.createElement('img');
-        img.src = s.image || 'assets/silhouette.svg';
-        img.alt = 'vacía';
-        img.className = 'sticker-empty';
-        slot.appendChild(img);
+    const grid = document.createElement('div'); grid.className='stickers-grid';
+
+    const apiCards = (apiCountryObj.cards && Array.isArray(apiCountryObj.cards) && apiCountryObj.cards.length) ? apiCountryObj.cards : null;
+    if (apiCards) {
+      for (const cardInfo of apiCards) {
+        const apiCode = cardInfo.code || cardInfo.id;
+        const mockId = apiCodeToMockId(apiCode);
+        const slot = document.createElement('div'); slot.className='sticker-slot';
+        const placed = (state.album[apiC] && state.album[apiC].placed && state.album[apiC].placed.includes(mockId));
+        const copies = state.duplicates && state.duplicates[mockId] ? state.duplicates[mockId] : 0;
+        if (placed) {
+          slot.classList.add('sticker-placed');
+          const displayObj = { id: mockId, raw: cardInfo, image: cardInfo.imageUrl || cardInfo.image };
+          const node = makeStickerElement(displayObj);
+          slot.appendChild(node);
+        } else {
+          const img = document.createElement('img'); img.src = cardInfo.imageUrl || cardInfo.image || 'assets/silhouette.svg'; img.className='sticker-empty';
+          slot.appendChild(img);
+          const cap = document.createElement('div'); cap.className='sticker-caption'; cap.textContent = '';
+          slot.appendChild(cap);
+        }
+        if (copies>0) {
+          const badge = document.createElement('div'); badge.className='dup-badge'; badge.textContent = `x${copies}`;
+          badge.style.position='absolute'; badge.style.bottom='6px'; badge.style.right='6px';
+          slot.appendChild(badge);
+        }
+        grid.appendChild(slot);
       }
-      if(copies>0){
-        const badge = document.createElement('div');
-        badge.className = 'dup-badge';
-        badge.textContent = `x${copies}`;
-        badge.style.position='absolute';
-        badge.style.bottom='6px';
-        badge.style.right='6px';
-        slot.appendChild(badge);
+    } else {
+      // fallback rendering using state album arrays
+      const albumCountry = state.album[apiC] || { placed:[], missing:[] };
+      const combined = albumCountry.placed.concat(albumCountry.missing);
+      for (const mockId of combined) {
+        const slot = document.createElement('div'); slot.className='sticker-slot';
+        const placed = albumCountry.placed.includes(mockId);
+        const copies = state.duplicates && state.duplicates[mockId] ? state.duplicates[mockId] : 0;
+        if (placed) {
+          slot.classList.add('sticker-placed');
+          const displayObj = { id: mockId };
+          if (catalogCardByMockId[mockId]) displayObj.raw = catalogCardByMockId[mockId];
+          else displayObj.nombre = (allStickers[mockId] && allStickers[mockId].nombre) || mockId;
+          const node = makeStickerElement(displayObj);
+          slot.appendChild(node);
+        } else {
+          const img = document.createElement('img'); img.src = (allStickers[mockId] && allStickers[mockId].image) || 'assets/silhouette.svg'; img.className='sticker-empty';
+          slot.appendChild(img);
+          const cap = document.createElement('div'); cap.className='sticker-caption'; cap.textContent = '';
+          slot.appendChild(cap);
+        }
+        if (copies>0) {
+          const badge = document.createElement('div'); badge.className='dup-badge'; badge.textContent = `x${copies}`;
+          badge.style.position='absolute'; badge.style.bottom='6px'; badge.style.right='6px';
+          slot.appendChild(badge);
+        }
+        grid.appendChild(slot);
       }
-      grid.appendChild(slot);
     }
 
     card.appendChild(grid);
@@ -104,220 +197,232 @@ function renderAlbum(){
   }
 }
 
-// Load state from API (mock)
-async function boot(){
-  state = await api.getInitialState();
-  updateDupCount();
-  renderAlbum();
-  renderDuplicates();
-  populateTradeSelectors();
-  startFakeSocket();
-}
-boot();
+/* Show detailed view for a single API country (apiCode), larger cards for readability */
+function showCountry(apiCode) {
+  // populate countryTitle and countryGrid
+  const apiCountryObj = catalogByApiCountry[apiCode] || {};
+  const displayName = apiCountryObj.name || apiCountryObj.country || apiCode;
+  countryTitle.textContent = `${displayName} — ${apiCode}`;
+  countryGrid.innerHTML = '';
 
-// Pack flow
-openPackBtn.addEventListener('click', async ()=>{
-  openPackBtn.disabled = true;
-  const res = await api.requestPack();
-  currentPack = res.pack;
-  showPackModal(currentPack);
-  openPackBtn.disabled = false;
-});
-
-document.getElementById('open-pack-btn').addEventListener('click', ()=>openPackBtn.click());
-
-function showPackModal(pack){
-  packItems.innerHTML='';
-  // add items with staggered animation
-  for(let i=0;i<pack.length;i++){
-    const s = pack[i];
-    const el = makeStickerElement(s);
-    el.classList.add('pack-item');
-    // stagger using inline style animation delay
-    el.style.animationDelay = `${i * 80}ms`;
-    packItems.appendChild(el);
-  }
-  packModal.classList.remove('hidden');
-  packModal.setAttribute('aria-hidden','false');
-  showToast('Abriste un sobre', {duration: 1800});
-}
-
-discardPackBtn.addEventListener('click', ()=>{
-  packModal.classList.add('hidden');
-  packModal.setAttribute('aria-hidden','true');
-});
-
-acceptPackBtn.addEventListener('click', ()=>{
-  // Agregar pack al inventario/album: si no existe en placed -> pegarlo (primera copia); si ya existe -> duplicada
-  for(const p of currentPack){
-    const albumCountry = state.album[p.country];
-    if(!albumCountry) continue;
-    const already = albumCountry.placed.includes(p.id);
-    if(!already){
-      albumCountry.placed.push(p.id);
-      // remove from missing
-      const idx = albumCountry.missing.indexOf(p.id);
-      if(idx>=0) albumCountry.missing.splice(idx,1);
-    } else {
-      state.duplicates[p.id] = (state.duplicates[p.id]||0)+1;
+  // prefer API cards list
+  const cards = (apiCountryObj.cards && apiCountryObj.cards.length) ? apiCountryObj.cards : (state.album[apiCode] ? state.album[apiCode].placed.concat(state.album[apiCode].missing) : []);
+  // If cards are API objects, render accordingly; if they are mockIds, render based on mockAllStickers
+  if (cards.length && typeof cards[0] === 'object') {
+    for (const cardInfo of cards) {
+      const apiCodeCard = cardInfo.code || cardInfo.id;
+      const mockId = apiCodeToMockId(apiCodeCard);
+      const slot = document.createElement('div'); slot.className='sticker-slot large-slot';
+      const placed = state.album[apiCode] && state.album[apiCode].placed && state.album[apiCode].placed.includes(mockId);
+      const copies = state.duplicates && state.duplicates[mockId] ? state.duplicates[mockId] : 0;
+      if (placed) {
+        slot.classList.add('sticker-placed');
+        const displayObj = { id: mockId, raw: cardInfo, image: cardInfo.imageUrl || cardInfo.image };
+        const node = makeStickerElement(displayObj, { large: true });
+        slot.appendChild(node);
+      } else {
+        const img = document.createElement('img'); img.src = cardInfo.imageUrl || cardInfo.image || 'assets/silhouette.svg'; img.className='sticker-empty';
+        slot.appendChild(img);
+        const cap = document.createElement('div'); cap.className='sticker-caption'; cap.textContent = '';
+        slot.appendChild(cap);
+      }
+      if (copies>0) {
+        const badge = document.createElement('div'); badge.className='dup-badge'; badge.textContent = `x${copies}`;
+        badge.style.position='absolute'; badge.style.bottom='6px'; badge.style.right='6px';
+        slot.appendChild(badge);
+      }
+      countryGrid.appendChild(slot);
+    }
+  } else {
+    // cards list is mockIds
+    for (const mockId of cards) {
+      const slot = document.createElement('div'); slot.className='sticker-slot large-slot';
+      const placed = state.album[apiCode] && state.album[apiCode].placed && state.album[apiCode].placed.includes(mockId);
+      const copies = state.duplicates && state.duplicates[mockId] ? state.duplicates[mockId] : 0;
+      if (placed) {
+        slot.classList.add('sticker-placed');
+        const displayObj = { id: mockId };
+        if (catalogCardByMockId[mockId]) displayObj.raw = catalogCardByMockId[mockId]; else displayObj.nombre = (allStickers[mockId] && allStickers[mockId].nombre) || mockId;
+        const node = makeStickerElement(displayObj, { large: true });
+        slot.appendChild(node);
+      } else {
+        const img = document.createElement('img'); img.src = (allStickers[mockId] && allStickers[mockId].image) || 'assets/silhouette.svg'; img.className='sticker-empty';
+        slot.appendChild(img);
+        const cap = document.createElement('div'); cap.className='sticker-caption'; cap.textContent = '';
+        slot.appendChild(cap);
+      }
+      if (copies>0) {
+        const badge = document.createElement('div'); badge.className='dup-badge'; badge.textContent = `x${copies}`;
+        badge.style.position='absolute'; badge.style.bottom='6px'; badge.style.right='6px';
+        slot.appendChild(badge);
+      }
+      countryGrid.appendChild(slot);
     }
   }
-  api.saveState(state);
-  renderAlbum();
-  renderDuplicates();
-  populateTradeSelectors();
-  packModal.classList.add('hidden');
-  packModal.setAttribute('aria-hidden','true');
-  showToast('Sobre agregado al álbum', {duration:2000});
-});
 
-// Duplicates view
-function renderDuplicates(){
-  duplicatesList.innerHTML='';
+  showView('country-view');
+  // focus the back button for accessibility
+  try { backToAlbumBtn && backToAlbumBtn.focus && backToAlbumBtn.focus(); } catch(e){}
+}
+
+/* Back button */
+backToAlbumBtn && backToAlbumBtn.addEventListener('click', ()=> showView('album-view', btnAlbum));
+
+/* Render duplicates (unchanged) */
+function renderDuplicates() {
+  if (!duplicatesList) return;
+  duplicatesList.innerHTML = '';
   duplicatesList.classList.add('stickers-grid');
-  for(const id of Object.keys(state.duplicates)){
-    const count = state.duplicates[id];
-    if(count<=0) continue;
-    const s = allStickers[id];
-    const card = makeStickerElement(s,{small:true});
-    const meta = card.querySelector('.sticker-meta');
-    const badge = document.createElement('div');
-    badge.textContent = `Repetidas: ${count}`;
-    badge.style.fontSize='0.75rem';
-    badge.style.color='var(--muted)';
-    badge.style.marginLeft='6px';
-    meta.appendChild(badge);
+  let total = 0;
+  for (const id of Object.keys(state.duplicates || {})) {
+    const count = state.duplicates[id] || 0;
+    if (count<=0) continue;
+    total += count;
+    const info = { id };
+    if (catalogCardByMockId[id]) info.raw = catalogCardByMockId[id]; else info.nombre = (allStickers[id] && allStickers[id].nombre) || id;
+    const card = makeStickerElement(info, { small:true });
+    const meta = card.querySelector('.sticker-meta') || document.createElement('div');
+    const badge = document.createElement('div'); badge.textContent = `Repetidas: ${count}`; badge.style.fontSize='0.75rem'; badge.style.marginTop='6px';
+    meta.appendChild(badge); card.appendChild(meta);
     duplicatesList.appendChild(card);
   }
-  updateDupCount();
+  if (dupCountSpan) dupCountSpan.textContent = String(total);
 }
 
-// Update duplicates counter in header
-function updateDupCount(){
-  const total = Object.values(state.duplicates||{}).reduce((a,b)=>a+b,0);
-  dupCountSpan.textContent = String(total);
+/* Pack modal handlers (unchanged) */
+function showPackModal(pack) {
+  if (!packModal || !packItems) return;
+  packItems.innerHTML = '';
+  for (let i=0;i<pack.length;i++){
+    const p = pack[i];
+    const base = { id: p.id, raw: p.raw, image: p.image || (p.raw && (p.raw.imageUrl||p.raw.image)) || (allStickers[p.id] && allStickers[p.id].image) };
+    const el = makeStickerElement(base);
+    el.classList.add('pack-item');
+    el.style.animationDelay = `${i*70}ms`;
+    packItems.appendChild(el);
+  }
+  packModal.classList.remove('hidden'); packModal.setAttribute('aria-hidden','false');
+  try{ acceptPackBtn && acceptPackBtn.focus && acceptPackBtn.focus(); }catch(e){}
 }
+async function openPackFlow(buttonElement) {
+  if (buttonElement) buttonElement.disabled = true;
+  try {
+    const res = await api.requestPack();
+    currentPack = res.pack || [];
+    showPackModal(currentPack);
+  } catch(e) { console.error(e); showToast('Error al abrir sobre',{type:'danger'}); }
+  finally { if (buttonElement) buttonElement.disabled = false; }
+}
+discardPackBtn && discardPackBtn.addEventListener('click', ()=>{ try{document.activeElement.blur()}catch(e){}; packModal.classList.add('hidden'); packModal.setAttribute('aria-hidden','true'); (document.getElementById('open-pack-btn')||document.getElementById('btn-open-pack'))?.focus(); });
 
-// Trade UI: selectors
-function populateTradeSelectors(){
-  // my duplicates
-  myDuplicateSelect.innerHTML='';
-  for(const id of Object.keys(state.duplicates)){
-    const count = state.duplicates[id];
-    if(count>0){
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = `${id} — ${allStickers[id].nombre} (x${count})`;
-      myDuplicateSelect.appendChild(opt);
+acceptPackBtn && acceptPackBtn.addEventListener('click', ()=>{
+  for (const p of currentPack) {
+    const mockId = p.id || (p.raw && apiCodeToMockId(p.raw.code||p.raw.id)) || null;
+    if (!mockId) continue;
+    // find api country
+    let found = null;
+    for (const apiC of Object.keys(catalogByApiCountry||{})) {
+      const cards = catalogByApiCountry[apiC].cards || [];
+      if (cards.find(cd => apiCodeToMockId(cd.code||cd.id) === mockId)) { found = apiC; break; }
+    }
+    if (!found && allStickers[mockId] && allStickers[mockId].country) {
+      const maybe = allStickers[mockId].country;
+      if (state.album[maybe]) found = maybe;
+    }
+    if (!found) continue;
+    state.album[found] = state.album[found] || { placed:[], missing:[] };
+    const albumCountry = state.album[found];
+    if (!albumCountry.placed.includes(mockId)) {
+      albumCountry.placed.push(mockId);
+      const idx = albumCountry.missing.indexOf(mockId);
+      if (idx>=0) albumCountry.missing.splice(idx,1);
+    } else {
+      state.duplicates[mockId] = (state.duplicates[mockId]||0)+1;
     }
   }
-  if(!myDuplicateSelect.children.length){
-    const opt = document.createElement('option'); opt.value=''; opt.textContent='(No tienes repetidas)';
-    myDuplicateSelect.appendChild(opt);
-  }
-
-  // desired: mostrar faltantes de todo el álbum
-  desiredSelect.innerHTML='';
-  for(const c of countries){
-    const missing = state.album[c.code].missing;
-    for(const id of missing){
-      const opt = document.createElement('option');
-      opt.value = id;
-      opt.textContent = `${id} — ${c.name} / ${allStickers[id].nombre}`;
-      desiredSelect.appendChild(opt);
-    }
-  }
-}
-
-sendOfferBtn.addEventListener('click', async ()=>{
-  const offeredId = myDuplicateSelect.value;
-  const desiredId = desiredSelect.value;
-  const toGroup = document.getElementById('target-group').value;
-  if(!offeredId || !desiredId){ showToast('Selecciona ofrecida y deseada', {type:'danger'}); return; }
-  const res = await api.sendOffer({ fromApiKey: state.apiKey, toGroup, offeredId, desiredId });
-  // Simular que la oferta se envía y se consume localmente
-  appendIncomingOffer(res.offer); // en mock lo veremos como entrada también
-  state.duplicates[offeredId] = Math.max(0,(state.duplicates[offeredId]||1)-1);
   api.saveState(state);
-  renderDuplicates();
-  populateTradeSelectors();
-  showToast('Oferta enviada', {duration:1800});
+  renderAlbum(); renderDuplicates(); updateDupCount();
+  try{ acceptPackBtn.blur() }catch(e){}
+  packModal.classList.add('hidden'); packModal.setAttribute('aria-hidden','true');
+  (document.getElementById('open-pack-btn')||document.getElementById('btn-open-pack'))?.focus();
+  showToast('Sobre agregado al álbum',{duration:1500});
 });
 
-// Incoming offers list (mock)
-function appendIncomingOffer(offer){
-  const item = document.createElement('div');
-  item.className = 'offer';
-  item.innerHTML = `<div>
-    <strong>${offer.from}</strong> ofrece <em>${offer.offeredId}</em> por <em>${offer.desiredId}</em>
-  </div>`;
-  const actions = document.createElement('div');
-  const accept = document.createElement('button'); accept.textContent='Aceptar'; accept.className='primary';
-  const reject = document.createElement('button'); reject.textContent='Rechazar'; reject.className='ghost';
-  actions.appendChild(accept); actions.appendChild(reject);
-  item.appendChild(actions);
-  incomingOffers.prepend(item);
-
-  accept.addEventListener('click', ()=>{
-    // Simular aceptar: intercambiar si posible
-    if(!state.duplicates[offer.offeredId] || state.duplicates[offer.offeredId]<=0){
-      showToast('No tienes esa repetida para aceptar (mock).', {type:'danger'});
-      return;
+/* Helpers: checkDuplicates/reconcile (as before) */
+function checkDuplicates() {
+  const duplicates = state.duplicates || {};
+  const dupKeys = Object.keys(duplicates);
+  const placedSet = new Set();
+  for (const apiC of Object.keys(state.album||{})) (state.album[apiC].placed||[]).forEach(id=>placedSet.add(id));
+  const trueRepeats = dupKeys.filter(k=>placedSet.has(k)).map(k=>({id:k,count:duplicates[k],name:(catalogCardByMockId[k] && getFullName(catalogCardByMockId[k]))||(allStickers[k]&&allStickers[k].nombre)||k}));
+  const orphan = dupKeys.filter(k=>!placedSet.has(k)).map(k=>({id:k,count:duplicates[k],name:(catalogCardByMockId[k] && getFullName(catalogCardByMockId[k]))||(allStickers[k]&&allStickers[k].nombre)||k}));
+  return { trueRepeats, orphanDuplicates: orphan };
+}
+function reconcileDuplicates() {
+  const before = checkDuplicates();
+  const moved = []; const errors = [];
+  for (const entry of before.orphanDuplicates) {
+    const key = entry.id;
+    let foundApi = null;
+    for (const apiC of Object.keys(catalogByApiCountry||{})) {
+      const cards = catalogByApiCountry[apiC].cards || [];
+      if (cards.find(cd => apiCodeToMockId(cd.code||cd.id) === key)) { foundApi = apiC; break; }
     }
-    // hacer swap: restar repetida, marcar desiredId como placed (si no está)
-    state.duplicates[offer.offeredId] = Math.max(0, state.duplicates[offer.offeredId]-1);
-    // colocar desiredId en album
-    const targetSticker = allStickers[offer.desiredId];
-    if(targetSticker){
-      const albumCountry = state.album[targetSticker.country];
-      if(albumCountry && !albumCountry.placed.includes(offer.desiredId)){
-        albumCountry.placed.push(offer.desiredId);
-        const idx = albumCountry.missing.indexOf(offer.desiredId);
-        if(idx>=0) albumCountry.missing.splice(idx,1);
+    if (!foundApi && allStickers[key] && allStickers[key].country) {
+      if (state.album[allStickers[key].country]) foundApi = allStickers[key].country;
+    }
+    if (!foundApi) { errors.push({key,reason:'no mapping'}); continue;}
+    state.album[foundApi] = state.album[foundApi] || { placed:[], missing:[] };
+    if (!state.album[foundApi].placed.includes(key)) {
+      state.album[foundApi].placed.push(key);
+      const idx = state.album[foundApi].missing.indexOf(key); if (idx>=0) state.album[foundApi].missing.splice(idx,1);
+      state.duplicates[key] = Math.max(0,(state.duplicates[key]||1)-1); if (state.duplicates[key]===0) delete state.duplicates[key];
+      moved.push({id:key,to:foundApi});
+    }
+  }
+  if (moved.length) api.saveState(state);
+  renderAlbum(); renderDuplicates(); updateDupCount();
+  return {before, moved, errors, after: checkDuplicates()};
+}
+
+/* Boot */
+async function boot() {
+  const savedKey = localStorage.getItem('album_api_key'); if (savedKey) api.setApiKey(savedKey);
+  btnAlbum && btnAlbum.addEventListener('click', ()=>showView('album-view', btnAlbum));
+  btnOpenPack && btnOpenPack.addEventListener('click', ()=>showView('pack-view', btnOpenPack));
+  btnDuplicates && btnDuplicates.addEventListener('click', ()=>{ showView('duplicates-view', btnDuplicates); renderDuplicates(); });
+  btnTrades && btnTrades.addEventListener('click', ()=>showView('trades-view', btnTrades));
+
+  state = await api.getInitialState();
+
+  catalogByApiCountry = {}; catalogCardByMockId = {};
+  try {
+    if (state.rawCatalog && Array.isArray(state.rawCatalog.countries)) {
+      for (const apiCountry of state.rawCatalog.countries) {
+        const apiCode = (apiCountry.countryCode || apiCountry.code || '').toString().toUpperCase();
+        if (!apiCode) continue;
+        catalogByApiCountry[apiCode] = apiCountry;
+        const cards = apiCountry.cards || apiCountry.cardsList || apiCountry.cards || [];
+        for (const card of cards) {
+          const code = card.code || card.id; if (!code) continue;
+          const mockId = apiCodeToMockId(code); catalogCardByMockId[mockId] = card;
+        }
       }
     }
-    api.saveState(state);
-    renderAlbum();
-    renderDuplicates();
-    item.remove();
-    showToast('Intercambio aceptado (mock).', {type:'success'});
-  });
+  } catch(e){ console.warn('catalog map fail', e); catalogByApiCountry={}; catalogCardByMockId={}; }
 
-  reject.addEventListener('click', ()=>{
-    item.remove();
-    showToast('Oferta rechazada', {duration:1200});
-  });
-}
+  // auto reconcile
+  const repair = reconcileDuplicates();
+  if (repair.moved && repair.moved.length) showToast(`${repair.moved.length} repetida(s) pegada(s) automáticamente`, {duration:2200});
 
-/* ---------- Fake Socket (simulación de eventos en vivo) ---------- */
-function startFakeSocket(){
-  setInterval(()=>{
-    const allIds = Object.keys(allStickers);
-    const offeredId = allIds[Math.floor(Math.random()*allIds.length)];
-    const missingList = [];
-    for(const c of countries) missingList.push(...state.album[c.code].missing);
-    const desiredId = missingList.length ? missingList[Math.floor(Math.random()*missingList.length)] : allIds[Math.floor(Math.random()*allIds.length)];
-    const offer = { id:`IN-${Date.now()}`, from:'Grupo-Mock', to:state.apiKey, offeredId, desiredId, status:'pending' };
-    appendIncomingOffer(offer);
-    showToast('Nueva oferta entrante', {duration:1400});
-  }, 30000 + Math.random()*15000);
-}
-
-/* ---------- Toasts ---------- */
-function showToast(message, opts={}){
-  const t = document.createElement('div');
-  t.className = 'toast';
-  if(opts.type==='danger'){
-    t.style.background = 'linear-gradient(90deg,#ef4444,#dc2626)';
-  } else if(opts.type==='success'){
-    t.style.background = 'linear-gradient(90deg,#16a34a,#059669)';
+  updateDupCount(); renderAlbum(); renderDuplicates(); populateTradeSelectors();
+  if (typeof window !== 'undefined') {
+    window.appState = ()=>state;
+    window.apiCatalogByApiCountry = ()=>catalogByApiCountry;
+    window.apiCatalogCards = ()=>catalogCardByMockId;
+    window.checkDuplicates = ()=>checkDuplicates();
+    window.reconcileDuplicates = ()=>reconcileDuplicates();
   }
-  t.textContent = message;
-  toastContainer.appendChild(t);
-  const duration = opts.duration || 2500;
-  setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateY(10px)'; }, duration);
-  setTimeout(()=>{ t.remove(); }, duration + 380);
+  if (api.isRemote()) showToast('Conectado a API remota', { duration: 1200 });
 }
-
-/* ---------- Utilities (pequeñas helpers extra) ---------- */
-window.appState = () => state; // para debugging desde consola
+boot();
