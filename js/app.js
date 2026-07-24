@@ -1,7 +1,8 @@
 // js/app.js
-// Versión modificada para priorizar imágenes locales subidas manualmente en assets/cards/
-// - Prioridad imágenes: local assets (.svg,.webp,.png,.jpg) -> API (imageUrl/image) -> displayObj.image -> fallback silhouette
-// - No realiza búsquedas automáticas. Mantiene el resto de la lógica (vista por selección, reconciliación de duplicados, etc.).
+// Versión estable y simplificada: sin lógica de imágenes locales compleja.
+// - Imágenes: API (imageUrl/image) -> displayObj.image -> assets/silhouette.svg
+// - Logs en openPackFlow para depuración del problema "abrir sobre".
+// - Mantiene la vista por selección, duplicados y reconciliación.
 
 import { allStickers } from './mockData.js';
 import { api } from './api.js';
@@ -39,7 +40,7 @@ let currentPack = [];
 let catalogByApiCountry = {};
 let catalogCardByMockId = {};
 
-/* ---------- Helpers UI ---------- */
+/* ---------- Helpers ---------- */
 function showToast(msg, opts = {}) {
   const t = document.createElement('div');
   t.className = 'toast';
@@ -50,7 +51,6 @@ function showToast(msg, opts = {}) {
   setTimeout(() => t.remove(), opts.duration || 2200);
 }
 
-/* ---------- id & name helpers ---------- */
 function apiCodeToMockId(apiCode) {
   if (!apiCode || typeof apiCode !== 'string') return apiCode;
   const parts = apiCode.split('-');
@@ -69,7 +69,7 @@ function getFullName(card) {
   return card.code || card.id || '';
 }
 
-/* ---------- Early functions ---------- */
+/* ---------- Funciones que deben existir pronto ---------- */
 function showView(id, btn) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const view = document.getElementById(id);
@@ -84,38 +84,32 @@ function updateDupCount() {
   if (dupCountSpan) dupCountSpan.textContent = String(total);
 }
 
-/* ---------- makeStickerElement (prioriza assets locales) ---------- */
+/* ---------- makeStickerElement simple ---------- */
 function makeStickerElement(displayObj, opts = {}) {
   const tmpl = document.getElementById('sticker-template');
   const apiCard = catalogCardByMockId[displayObj.id] || (displayObj.raw || null);
   const name = (apiCard && (apiCard.fullName || apiCard.playerName || apiCard.name)) || displayObj.nombre || (allStickers[displayObj.id] && allStickers[displayObj.id].nombre) || displayObj.id;
   const role = (apiCard && apiCard.role) || displayObj.role || displayObj.rol || (allStickers[displayObj.id] && allStickers[displayObj.id].rol) || '';
 
-  // Local assets first (svg, webp, png, jpg), then API images, then displayObj.image, then fallback
-  const candidates = [];
-  if (displayObj.id) {
-    candidates.push(`assets/cards/${displayObj.id}.svg`);
-    candidates.push(`assets/cards/${displayObj.id}.webp`);
-    candidates.push(`assets/cards/${displayObj.id}.png`);
-    candidates.push(`assets/cards/${displayObj.id}.jpg`);
-  }
+  // Simple fallback order: API image -> displayObj.image -> silhouette
+  const srcCandidates = [];
   if (apiCard) {
-    if (apiCard.imageUrl) candidates.push(apiCard.imageUrl);
-    if (apiCard.image) candidates.push(apiCard.image);
+    if (apiCard.imageUrl) srcCandidates.push(apiCard.imageUrl);
+    if (apiCard.image) srcCandidates.push(apiCard.image);
   }
-  if (displayObj.image) candidates.push(displayObj.image);
-  candidates.push('assets/silhouette.svg');
+  if (displayObj.image) srcCandidates.push(displayObj.image);
+  srcCandidates.push('assets/silhouette.svg');
 
-  function setImgWithFallback(imgEl, list) {
+  function setImg(imgEl) {
     let i = 0;
     imgEl.loading = 'lazy';
     imgEl.decoding = 'async';
     imgEl.onerror = () => {
       i++;
-      if (i < list.length) imgEl.src = list[i];
+      if (i < srcCandidates.length) imgEl.src = srcCandidates[i];
       else imgEl.onerror = null;
     };
-    imgEl.src = list[i];
+    imgEl.src = srcCandidates[0];
   }
 
   if (!tmpl) {
@@ -126,19 +120,14 @@ function makeStickerElement(displayObj, opts = {}) {
 
     const img = document.createElement('img');
     img.className = 'sticker-img';
-    img.dataset.mockId = displayObj.id || '';
-    setImgWithFallback(img, candidates);
+    setImg(img);
     img.alt = name;
     wrap.appendChild(img);
 
-    const cap = document.createElement('div');
-    cap.className = 'sticker-caption';
-    cap.textContent = name;
-    cap.title = name;
+    const cap = document.createElement('div'); cap.className = 'sticker-caption'; cap.textContent = name; cap.title = name;
     wrap.appendChild(cap);
 
-    const meta = document.createElement('div');
-    meta.className = 'sticker-meta';
+    const meta = document.createElement('div'); meta.className = 'sticker-meta';
     const idSpan = document.createElement('small'); idSpan.className = 'sticker-id'; idSpan.textContent = displayObj.id || '';
     const roleSpan = document.createElement('span'); roleSpan.className = 'sticker-role'; roleSpan.textContent = role;
     meta.appendChild(idSpan); meta.appendChild(roleSpan); wrap.appendChild(meta);
@@ -148,21 +137,19 @@ function makeStickerElement(displayObj, opts = {}) {
 
   const node = tmpl.content.firstElementChild.cloneNode(true);
   const img = node.querySelector('.sticker-img');
-  img.dataset.mockId = displayObj.id || '';
-  setImgWithFallback(img, candidates);
+  setImg(img);
   img.alt = name;
   const caption = node.querySelector('.sticker-caption');
   caption.textContent = name;
   caption.title = name;
   node.querySelector('.sticker-id').textContent = displayObj.id || '';
   node.querySelector('.sticker-role').textContent = role || '';
-
   if (opts.large) node.classList.add('large');
   if (opts.small) node.classList.add('small');
   return node;
 }
 
-/* ---------- Render album (vista general) ---------- */
+/* ---------- Render album ---------- */
 function renderAlbum() {
   if (!albumGrid) return;
   albumGrid.innerHTML = '';
@@ -250,7 +237,7 @@ function renderAlbum() {
   }
 }
 
-/* ---------- Vista detallada por selección ---------- */
+/* ---------- Vista por selección ---------- */
 function showCountry(apiCode) {
   const apiCountryObj = catalogByApiCountry[apiCode] || {};
   const displayName = apiCountryObj.name || apiCountryObj.country || apiCode;
@@ -315,49 +302,103 @@ function showCountry(apiCode) {
 }
 backToAlbumBtn && backToAlbumBtn.addEventListener('click', () => showView('album-view', btnAlbum));
 
-/* ---------- Repetidas y reconciliación ---------- */
-// Reemplaza la función renderDuplicates existente por esta:
+/* ---------- Repetidas ---------- */
 function renderDuplicates() {
   if (!duplicatesList) return;
   duplicatesList.innerHTML = '';
-
-  // Usar grilla dedicada y no la stickers-grid (evita columnas angostas)
-  duplicatesList.classList.remove('stickers-grid');
-  duplicatesList.classList.add('duplicates-grid');
-
+  duplicatesList.classList.add('stickers-grid');
   let total = 0;
   for (const id of Object.keys(state.duplicates || {})) {
     const count = state.duplicates[id] || 0;
     if (count <= 0) continue;
     total += count;
-
-    // Construir display info: preferir tarjeta completa de la API si existe
     const info = { id };
     if (catalogCardByMockId[id]) info.raw = catalogCardByMockId[id];
     else info.nombre = (allStickers[id] && allStickers[id].nombre) || id;
-
-    // Pedimos la versión "small" pero con suficiente ancho y caption hasta 3 líneas
-    const cardEl = makeStickerElement(info, { small: true });
-
-    // Añadir meta/badge con conteo
-    const meta = cardEl.querySelector('.sticker-meta') || document.createElement('div');
-    meta.classList.add('sticker-meta'); // asegurar clase
-    // badge visible
-    const badge = document.createElement('div');
-    badge.textContent = `Repetidas: ${count}`;
-    badge.style.fontSize = '0.82rem';
-    badge.style.marginTop = '8px';
-    badge.style.textAlign = 'center';
-    meta.appendChild(badge);
-
-    // Si la plantilla no tiene .sticker-meta dentro, lo agregamos al final del card
-    if (!cardEl.querySelector('.sticker-meta')) cardEl.appendChild(meta);
-
-    duplicatesList.appendChild(cardEl);
+    const card = makeStickerElement(info, { small: true });
+    const meta = card.querySelector('.sticker-meta') || document.createElement('div');
+    const badge = document.createElement('div'); badge.textContent = `Repetidas: ${count}`; badge.style.fontSize = '0.75rem'; badge.style.marginTop = '6px';
+    meta.appendChild(badge); card.appendChild(meta);
+    duplicatesList.appendChild(card);
   }
-
   if (dupCountSpan) dupCountSpan.textContent = String(total);
 }
+
+/* ---------- open pack (con logs) ---------- */
+async function openPackFlow(buttonElement) {
+  if (buttonElement) buttonElement.disabled = true;
+  console.info('[app] openPackFlow started');
+  try {
+    const res = await api.requestPack();
+    console.info('[app] requestPack response', res);
+    currentPack = res.pack || [];
+    showPackModal(currentPack);
+  } catch (err) {
+    console.error('[app] openPack error', err);
+    showToast('Error al abrir sobre: ' + (err && err.message ? err.message : ''), { type: 'danger' });
+  } finally {
+    if (buttonElement) buttonElement.disabled = false;
+  }
+}
+
+/* ---------- Pack modal handlers & rest (identicos) ---------- */
+function showPackModal(pack) {
+  if (!packModal || !packItems) return;
+  packItems.innerHTML = '';
+  for (let i = 0; i < pack.length; i++) {
+    const p = pack[i];
+    const base = { id: p.id, raw: p.raw, image: p.image || (p.raw && (p.raw.imageUrl || p.raw.image)) || (allStickers[p.id] && allStickers[p.id].image) };
+    const el = makeStickerElement(base);
+    el.classList.add('pack-item');
+    el.style.animationDelay = `${i * 70}ms`;
+    packItems.appendChild(el);
+  }
+  packModal.classList.remove('hidden');
+  packModal.setAttribute('aria-hidden', 'false');
+  try { acceptPackBtn && acceptPackBtn.focus && acceptPackBtn.focus(); } catch (e) {}
+}
+discardPackBtn && discardPackBtn.addEventListener('click', () => {
+  try { document.activeElement && document.activeElement.blur && document.activeElement.blur(); } catch (e) {}
+  packModal.classList.add('hidden');
+  packModal.setAttribute('aria-hidden', 'true');
+  const from = document.getElementById('open-pack-btn') || document.getElementById('btn-open-pack');
+  try { from && from.focus && from.focus(); } catch (e) {}
+});
+acceptPackBtn && acceptPackBtn.addEventListener('click', () => {
+  for (const p of currentPack) {
+    let mockId = p.id || null;
+    if (!mockId && p.raw && p.raw.code) mockId = apiCodeToMockId(p.raw.code);
+    if (!mockId) continue;
+    let placedCountry = null;
+    for (const apiCode of Object.keys(catalogByApiCountry || {})) {
+      const cards = catalogByApiCountry[apiCode].cards || [];
+      if (cards.find(cd => apiCodeToMockId(cd.code || cd.id) === mockId)) { placedCountry = apiCode; break; }
+    }
+    if (!placedCountry && allStickers[mockId] && allStickers[mockId].country) {
+      const maybe = allStickers[mockId].country; if (state.album[maybe]) placedCountry = maybe;
+    }
+    if (!placedCountry) continue;
+    state.album[placedCountry] = state.album[placedCountry] || { placed: [], missing: [] };
+    const albumCountry = state.album[placedCountry];
+    if (!albumCountry.placed.includes(mockId)) {
+      albumCountry.placed.push(mockId);
+      const idx = albumCountry.missing.indexOf(mockId); if (idx >= 0) albumCountry.missing.splice(idx, 1);
+    } else {
+      state.duplicates[mockId] = (state.duplicates[mockId] || 0) + 1;
+    }
+  }
+
+  api.saveState(state);
+  renderAlbum(); renderDuplicates(); updateDupCount();
+
+  try { acceptPackBtn.blur(); } catch (e) {}
+  packModal.classList.add('hidden'); packModal.setAttribute('aria-hidden', 'true');
+  const from = document.getElementById('open-pack-btn') || document.getElementById('btn-open-pack');
+  try { from && from.focus && from.focus(); } catch (e) {}
+  showToast('Sobre agregado al álbum', { duration: 1500 });
+});
+
+/* ---------- Duplicates reconcile (unchanged) ---------- */
 function checkDuplicates() {
   const duplicates = state.duplicates || {};
   const dupKeys = Object.keys(duplicates);
@@ -395,155 +436,14 @@ function reconcileDuplicates() {
   return { before, moved, errors, after: checkDuplicates() };
 }
 
-/* ---------- Pack modal & flujo ---------- */
-function showPackModal(pack) {
-  if (!packModal || !packItems) return;
-  packItems.innerHTML = '';
-  for (let i = 0; i < pack.length; i++) {
-    const p = pack[i];
-    const base = { id: p.id, raw: p.raw, image: p.image || (p.raw && (p.raw.imageUrl || p.raw.image)) || (allStickers[p.id] && allStickers[p.id].image) };
-    const el = makeStickerElement(base);
-    el.classList.add('pack-item');
-    el.style.animationDelay = `${i * 70}ms`;
-    packItems.appendChild(el);
-  }
-  packModal.classList.remove('hidden');
-  packModal.setAttribute('aria-hidden', 'false');
-  try { acceptPackBtn && acceptPackBtn.focus && acceptPackBtn.focus(); } catch (e) {}
-}
-async function openPackFlow(buttonElement) {
-  if (buttonElement) buttonElement.disabled = true;
-  try {
-    const res = await api.requestPack();
-    currentPack = res.pack || [];
-    showPackModal(currentPack);
-  } catch (err) {
-    console.error('openPack error', err);
-    showToast('Error al abrir sobre: ' + (err && err.message ? err.message : ''), { type: 'danger' });
-  } finally {
-    if (buttonElement) buttonElement.disabled = false;
-  }
-}
-discardPackBtn && discardPackBtn.addEventListener('click', () => {
-  try { document.activeElement && document.activeElement.blur && document.activeElement.blur(); } catch (e) {}
-  packModal.classList.add('hidden');
-  packModal.setAttribute('aria-hidden', 'true');
-  const from = document.getElementById('open-pack-btn') || document.getElementById('btn-open-pack');
-  try { from && from.focus && from.focus(); } catch (e) {}
-});
-acceptPackBtn && acceptPackBtn.addEventListener('click', () => {
-  for (const p of currentPack) {
-    let mockId = p.id || null;
-    if (!mockId && p.raw && p.raw.code) mockId = apiCodeToMockId(p.raw.code);
-    if (!mockId) continue;
-    let placedCountry = null;
-    for (const apiCode of Object.keys(catalogByApiCountry || {})) {
-      const cards = catalogByApiCountry[apiCode].cards || [];
-      if (cards.find(cd => apiCodeToMockId(cd.code || cd.id) === mockId)) { placedCountry = apiCode; break; }
-    }
-    if (!placedCountry && allStickers[mockId] && allStickers[mockId].country) {
-      const maybe = allStickers[mockId].country; if (state.album[maybe]) placedCountry = maybe;
-    }
-    if (!placedCountry) continue;
-    state.album[placedCountry] = state.album[placedCountry] || { placed: [], missing: [] };
-    const albumCountry = state.album[placedCountry];
-    if (!albumCountry.placed.includes(mockId)) {
-      albumCountry.placed.push(mockId);
-      const idx = albumCountry.missing.indexOf(mockId); if (idx >= 0) albumCountry.missing.splice(idx, 1);
-    } else {
-      state.duplicates[mockId] = (state.duplicates[mockId] || 0) + 1;
-    }
-  }
-
-  api.saveState(state);
-  renderAlbum();
-  renderDuplicates();
-  updateDupCount();
-
-  try { acceptPackBtn.blur(); } catch (e) {}
-  packModal.classList.add('hidden');
-  packModal.setAttribute('aria-hidden', 'true');
-  const from = document.getElementById('open-pack-btn') || document.getElementById('btn-open-pack');
-  try { from && from.focus && from.focus(); } catch (e) {}
-  showToast('Sobre agregado al álbum', { duration: 1500 });
-});
-
-/* ---------- Fake socket (opcional) ---------- */
-function appendIncomingOffer(offer) {
-  if (!incomingOffers) return;
-  const item = document.createElement('div'); item.className = 'offer';
-  item.innerHTML = `<div><strong>${offer.from}</strong> ofrece <em>${offer.offeredId}</em> por <em>${offer.desiredId}</em></div>`;
-  const actions = document.createElement('div');
-  const accept = document.createElement('button'); accept.textContent = 'Aceptar'; accept.className = 'primary';
-  const reject = document.createElement('button'); reject.textContent = 'Rechazar'; reject.className = 'ghost';
-  actions.appendChild(accept); actions.appendChild(reject); item.appendChild(actions); incomingOffers.prepend(item);
-
-  accept.addEventListener('click', () => {
-    if (!state.duplicates[offer.offeredId] || state.duplicates[offer.offeredId] <= 0) { showToast('No tienes esa repetida', { type: 'danger' }); return; }
-    state.duplicates[offer.offeredId] = Math.max(0, state.duplicates[offer.offeredId] - 1);
-    const targetSticker = allStickers[offer.desiredId];
-    if (targetSticker) {
-      const albumCountry = state.album[targetSticker.country];
-      if (albumCountry && !albumCountry.placed.includes(offer.desiredId)) {
-        albumCountry.placed.push(offer.desiredId);
-        const idx = albumCountry.missing.indexOf(offer.desiredId); if (idx >= 0) albumCountry.missing.splice(idx, 1);
-      }
-    }
-    api.saveState(state);
-    renderAlbum(); renderDuplicates(); updateDupCount();
-    item.remove(); showToast('Intercambio aceptado (mock)', { type: 'success' });
-  });
-  reject.addEventListener('click', () => { item.remove(); showToast('Oferta rechazada'); });
-}
-function startFakeSocket() {
-  setInterval(() => {
-    const allIds = Object.keys(allStickers);
-    const offeredId = allIds[Math.floor(Math.random() * allIds.length)];
-    const missingList = [];
-    for (const c of Object.keys(state.album || {})) missingList.push(...(state.album[c].missing || []));
-    const desiredId = missingList.length ? missingList[Math.floor(Math.random() * missingList.length)] : allIds[Math.floor(Math.random() * allIds.length)];
-    const offer = { id: `IN-${Date.now()}`, from: 'Grupo-Mock', to: state.apiKey, offeredId, desiredId, status: 'pending' };
-    appendIncomingOffer(offer); showToast('Nueva oferta entrante', { duration: 1400 });
-  }, 30000 + Math.random() * 15000);
-}
-startFakeSocket();
-
-/* ---------- Populate trade selectors ---------- */
-function populateTradeSelectors() {
-  if (myDuplicateSelect) {
-    myDuplicateSelect.innerHTML = '';
-    for (const id of Object.keys(state.duplicates || {})) {
-      const count = state.duplicates[id];
-      if (count > 0) {
-        const display = (catalogCardByMockId[id] && getFullName(catalogCardByMockId[id])) || (allStickers[id] && allStickers[id].nombre) || id;
-        const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} — ${display} (x${count})`;
-        myDuplicateSelect.appendChild(opt);
-      }
-    }
-    if (!myDuplicateSelect.children.length) {
-      const opt = document.createElement('option'); opt.value = ''; opt.textContent = '(No tienes repetidas)'; myDuplicateSelect.appendChild(opt);
-    }
-  }
-
-  if (desiredSelect) {
-    desiredSelect.innerHTML = '';
-    for (const apiC of Object.keys(state.album || {})) {
-      const albumCountry = state.album[apiC] || { missing: [] };
-      for (const id of albumCountry.missing) {
-        const display = (catalogCardByMockId[id] && getFullName(catalogCardByMockId[id])) || (allStickers[id] && allStickers[id].nombre) || id;
-        const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} — ${apiC} / ${display}`;
-        desiredSelect.appendChild(opt);
-      }
-    }
-  }
-}
-
 /* ---------- Boot ---------- */
 async function boot() {
   const savedKey = localStorage.getItem('album_api_key'); if (savedKey) api.setApiKey(savedKey);
 
   btnAlbum && btnAlbum.addEventListener('click', () => showView('album-view', btnAlbum));
   btnOpenPack && btnOpenPack.addEventListener('click', () => showView('pack-view', btnOpenPack));
+  // Attach internal open-pack button to call openPackFlow
+  openPackBtn && openPackBtn.addEventListener('click', () => openPackFlow(openPackBtn));
   btnDuplicates && btnDuplicates.addEventListener('click', () => { showView('duplicates-view', btnDuplicates); renderDuplicates(); });
   btnTrades && btnTrades.addEventListener('click', () => showView('trades-view', btnTrades));
 
@@ -583,3 +483,33 @@ async function boot() {
   if (api.isRemote()) showToast('Conectado a API remota', { duration: 1200 });
 }
 boot();
+
+/* ---------- populateTradeSelectors (al final) ---------- */
+function populateTradeSelectors() {
+  if (myDuplicateSelect) {
+    myDuplicateSelect.innerHTML = '';
+    for (const id of Object.keys(state.duplicates || {})) {
+      const count = state.duplicates[id];
+      if (count > 0) {
+        const display = (catalogCardByMockId[id] && getFullName(catalogCardByMockId[id])) || (allStickers[id] && allStickers[id].nombre) || id;
+        const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} — ${display} (x${count})`;
+        myDuplicateSelect.appendChild(opt);
+      }
+    }
+    if (!myDuplicateSelect.children.length) {
+      const opt = document.createElement('option'); opt.value = ''; opt.textContent = '(No tienes repetidas)'; myDuplicateSelect.appendChild(opt);
+    }
+  }
+
+  if (desiredSelect) {
+    desiredSelect.innerHTML = '';
+    for (const apiC of Object.keys(state.album || {})) {
+      const albumCountry = state.album[apiC] || { missing: [] };
+      for (const id of albumCountry.missing) {
+        const display = (catalogCardByMockId[id] && getFullName(catalogCardByMockId[id])) || (allStickers[id] && allStickers[id].nombre) || id;
+        const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} — ${apiC} / ${display}`;
+        desiredSelect.appendChild(opt);
+      }
+    }
+  }
+}
