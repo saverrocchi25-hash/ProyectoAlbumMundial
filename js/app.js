@@ -6,6 +6,61 @@
 
 import { allStickers } from './mockData.js';
 import { api } from './api.js';
+// ----------------- IMAGE GENERATION & CACHE HELPERS -----------------
+
+// Deterministic color picker por string
+function pickColorFromString(s) {
+  if (!s) return '#0b6efd';
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h << 5) - h + s.charCodeAt(i);
+  const colors = ['#0b6efd','#7c3aed','#059669','#f97316','#ef4444','#0ea5e9','#efb24a','#06b6d4','#8b5cf6'];
+  return colors[Math.abs(h) % colors.length];
+}
+
+// Genera data-URL SVG para un jugador (iniciales + nombre + país)
+function generatePlayerSVGDataUrl(fullName, country, mockId, width = 512, height = 512) {
+  const initials = (() => {
+    if (!fullName) return '';
+    const parts = fullName.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  })();
+  const bg = pickColorFromString(country || mockId || fullName);
+  const safeName = (fullName || '').replace(/&/g, '&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const safeCountry = (country || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="${bg}" rx="20" ry="20"/>
+      <circle cx="${width*0.5}" cy="${height*0.34}" r="${Math.floor(width*0.22)}" fill="rgba(255,255,255,0.12)"/>
+      <text x="50%" y="${Math.floor(height*0.46)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.floor(width*0.18)}" fill="#ffffff" font-weight="700">${initials}</text>
+      <text x="50%" y="${Math.floor(height*0.78)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.floor(width*0.06)}" fill="rgba(255,255,255,0.95)">${safeName}</text>
+      <text x="50%" y="${Math.floor(height*0.9)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.floor(width*0.045)}" fill="rgba(255,255,255,0.82)">${safeCountry}</text>
+    </svg>`;
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
+
+// Genera data-URL SVG para escudo simple (usa countryName y texto "ESCUDO")
+function generateShieldSVGDataUrl(countryName, mockId, width = 512, height = 512) {
+  const bg = pickColorFromString(countryName || mockId);
+  const safeCountry = (countryName || '').replace(/&/g, '&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect width="100%" height="100%" fill="${bg}" rx="12" ry="12"/>
+      <path d="M ${width*0.2} ${height*0.28} L ${width*0.5} ${height*0.12} L ${width*0.8} ${height*0.28} L ${width*0.8} ${height*0.6} C ${width*0.8} ${height*0.76} ${width*0.6} ${height*0.92} ${width*0.5} ${height*0.98} C ${width*0.4} ${height*0.92} ${width*0.2} ${height*0.76} ${width*0.2} ${height*0.6} Z" fill="rgba(255,255,255,0.12)" />
+      <text x="50%" y="${Math.floor(height*0.55)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.floor(width*0.07)}" fill="#fff" font-weight="700">${safeCountry}</text>
+      <text x="50%" y="${Math.floor(height*0.72)}" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="${Math.floor(width*0.045)}" fill="rgba(255,255,255,0.9)">ESCUDO</text>
+    </svg>`;
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
+
+// Cache simple en localStorage para los SVG generados
+const GEN_CACHE_KEY = 'album_generated_images_v1';
+function readGenCache(){ try { return JSON.parse(localStorage.getItem(GEN_CACHE_KEY) || '{}'); } catch (e) { return {}; } }
+function writeGenCache(m){ try { localStorage.setItem(GEN_CACHE_KEY, JSON.stringify(m)); } catch (e) {} }
+function getGeneratedImage(mockId){ const m = readGenCache(); const e = m[mockId]; if(!e) return null; return e.url; }
+function setGeneratedImage(mockId, url){ const m = readGenCache(); m[mockId] = { url, ts: Date.now() }; writeGenCache(m); }
+
+// ----------------- end helpers -----------------
 
 /* ---------- Elementos del DOM ---------- */
 const albumGrid = document.getElementById('album-grid');
@@ -84,34 +139,78 @@ function updateDupCount() {
   if (dupCountSpan) dupCountSpan.textContent = String(total);
 }
 
-/* ---------- makeStickerElement simple ---------- */
+// ----------------- REEMPLAZAR makeStickerElement por esta versión -----------------
 function makeStickerElement(displayObj, opts = {}) {
   const tmpl = document.getElementById('sticker-template');
   const apiCard = catalogCardByMockId[displayObj.id] || (displayObj.raw || null);
   const name = (apiCard && (apiCard.fullName || apiCard.playerName || apiCard.name)) || displayObj.nombre || (allStickers[displayObj.id] && allStickers[displayObj.id].nombre) || displayObj.id;
   const role = (apiCard && apiCard.role) || displayObj.role || displayObj.rol || (allStickers[displayObj.id] && allStickers[displayObj.id].rol) || '';
 
-  // Simple fallback order: API image -> displayObj.image -> silhouette
-  const srcCandidates = [];
-  if (apiCard) {
-    if (apiCard.imageUrl) srcCandidates.push(apiCard.imageUrl);
-    if (apiCard.image) srcCandidates.push(apiCard.image);
+  // 1) construir candidates inicial (local assets first, then API, then display.image)
+  const candidates = [];
+  if (displayObj.id) {
+    candidates.push(`assets/cards/${displayObj.id}.svg`);
+    candidates.push(`assets/cards/${displayObj.id}.webp`);
+    candidates.push(`assets/cards/${displayObj.id}.png`);
+    candidates.push(`assets/cards/${displayObj.id}.jpg`);
   }
-  if (displayObj.image) srcCandidates.push(displayObj.image);
-  srcCandidates.push('assets/silhouette.svg');
+  if (apiCard) {
+    if (apiCard.imageUrl) candidates.push(apiCard.imageUrl);
+    if (apiCard.image) candidates.push(apiCard.image);
+  }
+  if (displayObj.image) candidates.push(displayObj.image);
 
-  function setImg(imgEl) {
+  // 2) si existe una imagen generada en cache, ponerla al frente
+  const genCached = getGeneratedImage(displayObj.id);
+  if (genCached) candidates.unshift(genCached);
+
+  // 3) siempre dejar el fallback final
+  candidates.push('assets/silhouette.svg');
+
+  function setImgWithFallback(imgEl, list) {
     let i = 0;
     imgEl.loading = 'lazy';
     imgEl.decoding = 'async';
     imgEl.onerror = () => {
       i++;
-      if (i < srcCandidates.length) imgEl.src = srcCandidates[i];
+      if (i < list.length) imgEl.src = list[i];
       else imgEl.onerror = null;
     };
-    imgEl.src = srcCandidates[0];
+    imgEl.src = list[i];
   }
 
+  // Si no había cache generada y no hay API image y no hay local asset comprobado -> generamos uno y cacheamos
+  // Decisión simple: si mockId endsWith '-00' => ESCUDO, sino => JUGADOR
+  async function ensureGeneratedImageIfNeeded(mockId) {
+    if (!mockId) return;
+    if (getGeneratedImage(mockId)) return; // ya cacheado
+    // If there is an API image or a local file likely present, don't auto-generate now
+    const hasApiImage = apiCard && (apiCard.imageUrl || apiCard.image);
+    // We won't test file existence sync; instead we'll generate only when no api image and no cached generated
+    if (hasApiImage) return;
+    // Generate SVG (player or shield)
+    const isShield = mockId.endsWith('-00');
+    const playerName = apiCard ? (apiCard.fullName || apiCard.playerName || apiCard.name) : (displayObj.nombre || '');
+    // countryName: try catalog -> allStickers
+    let countryName = '';
+    if (apiCard && (apiCard.country || apiCard.countryName)) countryName = apiCard.country || apiCard.countryName;
+    else if (allStickers[mockId] && allStickers[mockId].country) {
+      countryName = allStickers[mockId].country;
+    } else {
+      // try to find catalog entry
+      for (const apiC of Object.keys(catalogByApiCountry || {})) {
+        const cards = catalogByApiCountry[apiC].cards || [];
+        if (cards.find(cd => apiCodeToMockId(cd.code || cd.id) === mockId)) {
+          countryName = catalogByApiCountry[apiC].name || catalogByApiCountry[apiC].country || apiC;
+          break;
+        }
+      }
+    }
+    const genUrl = isShield ? generateShieldSVGDataUrl(countryName, mockId) : generatePlayerSVGDataUrl(playerName, countryName, mockId);
+    setGeneratedImage(mockId, genUrl);
+  }
+
+  // If template absent (edge-case) create DOM nodes manually
   if (!tmpl) {
     const wrap = document.createElement('div');
     wrap.className = 'sticker-card';
@@ -120,35 +219,60 @@ function makeStickerElement(displayObj, opts = {}) {
 
     const img = document.createElement('img');
     img.className = 'sticker-img';
-    setImg(img);
+    img.dataset.mockId = displayObj.id || '';
+    setImgWithFallback(img, candidates);
     img.alt = name;
     wrap.appendChild(img);
 
-    const cap = document.createElement('div'); cap.className = 'sticker-caption'; cap.textContent = name; cap.title = name;
+    const cap = document.createElement('div');
+    cap.className = 'sticker-caption';
+    cap.textContent = name;
+    cap.title = name;
     wrap.appendChild(cap);
 
-    const meta = document.createElement('div'); meta.className = 'sticker-meta';
+    const meta = document.createElement('div');
+    meta.className = 'sticker-meta';
     const idSpan = document.createElement('small'); idSpan.className = 'sticker-id'; idSpan.textContent = displayObj.id || '';
     const roleSpan = document.createElement('span'); roleSpan.className = 'sticker-role'; roleSpan.textContent = role;
     meta.appendChild(idSpan); meta.appendChild(roleSpan); wrap.appendChild(meta);
 
+    // try generate in background if needed
+    if (displayObj.id) ensureGeneratedImageIfNeeded(displayObj.id);
+
     return wrap;
   }
 
+  // Template path
   const node = tmpl.content.firstElementChild.cloneNode(true);
   const img = node.querySelector('.sticker-img');
-  setImg(img);
+  img.dataset.mockId = displayObj.id || '';
+  setImgWithFallback(img, candidates);
   img.alt = name;
   const caption = node.querySelector('.sticker-caption');
   caption.textContent = name;
   caption.title = name;
   node.querySelector('.sticker-id').textContent = displayObj.id || '';
   node.querySelector('.sticker-role').textContent = role || '';
+
   if (opts.large) node.classList.add('large');
   if (opts.small) node.classList.add('small');
+
+  // ensure generation in background if needed (non-blocking)
+  if (displayObj.id) {
+    // fire-and-forget
+    ensureGeneratedImageIfNeeded(displayObj.id).then(() => {
+      // if we generated a new url, update any <img> in DOM that matches data-mockId
+      const newUrl = getGeneratedImage(displayObj.id);
+      if (newUrl) {
+        document.querySelectorAll(`img[data-mock-id="${displayObj.id}"]`).forEach(el => { try { el.src = newUrl; } catch (e) {} });
+        document.querySelectorAll(`img[data-mockid="${displayObj.id}"]`).forEach(el => { try { el.src = newUrl; } catch (e) {} });
+      }
+    }).catch(()=>{});
+  }
+
   return node;
 }
-
+// ----------------- end makeStickerElement replacement -----------------
 /* ---------- Render album ---------- */
 function renderAlbum() {
   if (!albumGrid) return;
