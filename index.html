@@ -121,6 +121,107 @@
       </div>
     </article>
   </template>
+<!-- API Key widget: botón + modal para pegar API key (pegar antes de cargar js/app.js) -->
+<div id="api-key-widget" style="position:fixed; right:16px; top:74px; z-index:120;">
+  <button id="api-key-open" class="nav-btn" style="padding:8px 10px; border-radius:10px; background:rgba(255,255,255,0.9);">API Key</button>
+</div>
+
+<div id="api-key-modal" class="modal hidden" aria-hidden="true" style="z-index:130;">
+  <div class="modal-inner" style="max-width:420px;">
+    <h3 style="margin-top:0; margin-bottom:8px;">Introduce tu API Key</h3>
+    <input id="api-key-input" type="text" placeholder="Pega aquí tu API key" style="width:100%; padding:10px; border-radius:8px; border:1px solid #e6eefc; box-sizing:border-box;" />
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+      <button id="api-key-save" class="primary">Guardar y cargar</button>
+      <button id="api-key-clear" class="ghost">Borrar key</button>
+      <button id="api-key-cancel" class="ghost">Cancelar</button>
+    </div>
+    <p style="margin-top:10px; font-size:0.9rem; color:#555;">
+      Al guardar, se eliminará temporalmente cualquier estado local/demo y la app recargará para traer tu progreso desde la API.
+    </p>
+  </div>
+</div>
+
+<script>
+/* Control del widget/API key (funciona en desktop y en móvil).
+   Pegar justo antes de cargar js/app.js para que el comportamiento sea inmediato. */
+(function(){
+  // Elementos
+  const openBtn = document.getElementById('api-key-open');
+  const modal = document.getElementById('api-key-modal');
+  const input = document.getElementById('api-key-input');
+  const saveBtn = document.getElementById('api-key-save');
+  const clearBtn = document.getElementById('api-key-clear');
+  const cancelBtn = document.getElementById('api-key-cancel');
+
+  if (!openBtn || !modal || !input || !saveBtn || !clearBtn || !cancelBtn) return;
+
+  function showModal() {
+    modal.classList.remove('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    input.value = localStorage.getItem('album_api_key') || '';
+    // mover foco al input en móvil/desktop
+    setTimeout(() => { try { input.focus(); input.select(); } catch (e) {} }, 120);
+  }
+
+  function hideModal() {
+    modal.classList.add('hidden');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  openBtn.addEventListener('click', showModal);
+  cancelBtn.addEventListener('click', hideModal);
+
+  saveBtn.addEventListener('click', () => {
+    const val = (input.value || '').trim();
+    if (!val) {
+      alert('Introduce una API key válida.');
+      return;
+    }
+    try {
+      // Guardar la API key
+      localStorage.setItem('album_api_key', val);
+      // Eliminar estado local/demo para forzar carga desde servidor
+      localStorage.removeItem('album_state_v1');
+      // Opcional: limpiar cache de imagenes para forzar recarga
+      localStorage.removeItem('album_image_cache_v1');
+    } catch (e) {
+      console.warn('save api key error', e);
+    }
+    hideModal();
+    // Recargar para que la app use la API key y pida el estado remoto
+    location.reload();
+  });
+
+  clearBtn.addEventListener('click', () => {
+    if (!confirm('¿Borrar la API key guardada en este navegador?')) return;
+    try {
+      localStorage.removeItem('album_api_key');
+    } catch (e) { console.warn(e); }
+    hideModal();
+    location.reload();
+  });
+
+  // Cerrar modal si clic fuera del inner
+  modal.addEventListener('click', (ev) => {
+    if (ev.target === modal) hideModal();
+  });
+
+  // Optionally show a small indicator if key present (update button label)
+  function refreshOpenBtn() {
+    const key = localStorage.getItem('album_api_key');
+    if (key) {
+      openBtn.textContent = 'API Key (set)';
+      openBtn.style.fontWeight = '700';
+    } else {
+      openBtn.textContent = 'API Key';
+      openBtn.style.fontWeight = '600';
+    }
+  }
+  refreshOpenBtn();
+  // update when storage changes (other tab)
+  window.addEventListener('storage', refreshOpenBtn);
+})();
+</script>  
 
   <script type="module" src="js/app.js"></script>
 </body>
