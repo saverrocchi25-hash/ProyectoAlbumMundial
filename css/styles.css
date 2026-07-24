@@ -270,3 +270,24 @@ button:focus-visible, select:focus-visible { outline:3px solid rgba(11,110,253,0
 /* Misc utilities */
 .hidden { display:none !important; }
 .small { font-size:0.85rem; }
+/* --- Reglas específicas para la vista de Repetidas --- */
+.duplicates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); /* columnas más anchas para mostrar nombre */
+  gap: 12px;
+  align-items: start;
+  margin-top: 8px;
+  padding: 6px 0;
+}
+
+/* Aseguramos que las tarjetas small puedan mostrar 3 líneas y tengan ancho consistente */
+.sticker-card.small {
+  width: 140px;            /* ancho fijo razonable para repetidas */
+  padding: 8px;
+}
+
+.sticker-card.small .sticker-caption {
+  -webkit-line-clamp: 3;   /* hasta 3 líneas en repetidas */
+  font-size: 0.95rem;
+  max-height: 4.2em;
+}
