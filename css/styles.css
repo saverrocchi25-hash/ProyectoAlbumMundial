@@ -242,9 +242,26 @@ body {
 /* Trades layout */
 .trades-layout { display:grid; grid-template-columns:1fr; gap:1rem; }
 @media(min-width:900px) { .trades-layout { grid-template-columns:360px 1fr; } }
+.trades-header { display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; margin-bottom:1rem; }
+.trades-header h2 { margin:0 0 0.2rem; }
+.trades-header p { margin:0; color:var(--muted); }
 .panel { background:var(--card); padding:1rem; border-radius:12px; min-height:160px; box-shadow:var(--shadow-1); }
+.trade-tabs { display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.8rem; }
+.trade-tab { border:1px solid rgba(11,110,253,0.12); background:#f8fbff; color:var(--muted); border-radius:999px; padding:0.45rem 0.8rem; font-weight:600; cursor:pointer; }
+.trade-tab.active { background:linear-gradient(90deg,var(--primary-500),var(--primary-600)); color:white; }
 .offers-list { display:flex; flex-direction:column; gap:0.8rem; }
-.offer { border:1px solid rgba(11,110,253,0.04); padding:0.6rem; border-radius:10px; display:flex; justify-content:space-between; align-items:center; gap:0.6rem; }
+.offer-card { border:1px solid rgba(11,110,253,0.08); padding:0.8rem; border-radius:12px; background:linear-gradient(180deg,#fff,#f8fbff); box-shadow:0 8px 20px rgba(2,6,23,0.04); }
+.offer-card header { display:flex; justify-content:space-between; align-items:center; gap:0.6rem; margin-bottom:0.5rem; }
+.offer-card .offer-status { font-size:0.8rem; font-weight:700; color:var(--primary-600); }
+.offer-card .offer-meta { display:grid; gap:0.4rem; color:var(--muted); font-size:0.92rem; }
+.offer-actions { display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.7rem; }
+.offer-actions button { padding:0.45rem 0.7rem; border-radius:8px; border:1px solid rgba(11,110,253,0.12); cursor:pointer; font-weight:600; }
+.offer-actions .accept-btn { background:var(--success); color:white; border-color:var(--success); }
+.offer-actions .reject-btn { background:white; color:var(--danger); border-color:rgba(239,68,68,0.16); }
+.offer-actions .cancel-btn { background:white; color:var(--danger); border-color:rgba(239,68,68,0.16); }
+.offer-empty { padding:1rem; border:1px dashed rgba(11,110,253,0.16); border-radius:10px; color:var(--muted); background:#fbfdff; }
+.form-row { display:flex; flex-direction:column; gap:0.35rem; margin-bottom:0.7rem; }
+.form-row select { padding:0.6rem; border-radius:8px; border:1px solid rgba(11,110,253,0.16); background:white; }
 
 /* Accessibility focus visible */
 button:focus-visible, select:focus-visible { outline:3px solid rgba(11,110,253,0.18); outline-offset:3px; border-radius:8px; }

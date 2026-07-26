@@ -62,33 +62,49 @@
 
     <!-- Trades -->
     <section id="trades-view" class="view" aria-labelledby="btn-trades">
-      <h2>Mercado de Intercambios (Simulado)</h2>
+      <div class="trades-header">
+        <div>
+          <h2>Mercado de Intercambios</h2>
+          <p>Gestiona las ofertas entrantes, salientes y el historial desde una sola vista.</p>
+        </div>
+        <button id="refresh-trades" class="ghost">Actualizar</button>
+      </div>
+
       <div class="trades-layout">
         <div class="panel">
           <h3>Proponer intercambio</h3>
-          <p>Selecciona una repetida tuya y una barajita que te haga falta (mock).</p>
+          <p>Selecciona una repetida tuya y una barajita que te haga falta para enviarla a otro grupo.</p>
           <div class="form-row">
-            <label>Mi repetida</label>
+            <label for="my-duplicate-select">Mi repetida</label>
             <select id="my-duplicate-select"></select>
           </div>
           <div class="form-row">
-            <label>Quiero</label>
+            <label for="desired-select">Quiero</label>
             <select id="desired-select"></select>
           </div>
           <div class="form-row">
-            <label>Grupo destino (mock)</label>
+            <label for="target-group">Grupo destino</label>
             <select id="target-group">
-              <option value="grupoA">Grupo A</option>
-              <option value="grupoB">Grupo B</option>
-              <option value="grupoC">Grupo C</option>
+              <option value="Grupo A">Grupo A</option>
+              <option value="Grupo B">Grupo B</option>
+              <option value="Grupo C">Grupo C</option>
             </select>
           </div>
           <button id="send-offer" class="primary">Enviar Oferta</button>
         </div>
 
         <div class="panel">
-          <h3>Ofertas entrantes</h3>
-          <div id="incoming-offers" class="offers-list" role="list"></div>
+          <div class="trade-tabs" role="tablist" aria-label="Gestión de intercambios">
+            <button class="trade-tab active" data-tab="incoming" role="tab" aria-selected="true">Ofertas que recibo</button>
+            <button class="trade-tab" data-tab="outgoing" role="tab" aria-selected="false">Ofertas que envío</button>
+            <button class="trade-tab" data-tab="history" role="tab" aria-selected="false">Historial</button>
+          </div>
+
+          <div class="trade-panels">
+            <div id="incoming-offers" class="offers-list" role="tabpanel" aria-label="Ofertas que recibo"></div>
+            <div id="outgoing-offers" class="offers-list hidden" role="tabpanel" aria-label="Ofertas que envío"></div>
+            <div id="history-offers" class="offers-list hidden" role="tabpanel" aria-label="Historial"></div>
+          </div>
         </div>
       </div>
     </section>

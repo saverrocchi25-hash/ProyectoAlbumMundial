@@ -21,6 +21,15 @@ function apiCodeToMockId(apiCode) {
   if (num === 1) return `${country}-00`;
   return `${country}-${String(num - 1).padStart(2, '0')}`;
 }
+export function mockIdToApiCode(mockId) {
+  if (!mockId || typeof mockId !== 'string') return mockId;
+  const parts = mockId.split('-');
+  const country = parts[0];
+  const num = parseInt(parts[1], 10);
+  if (Number.isNaN(num)) return mockId;
+  if (num === 0) return `${country}-1`;
+  return `${country}-${num + 1}`;
+}
 
 // headers builder
 function headersJson() {
@@ -30,6 +39,30 @@ function headersJson() {
     h['x-api-key'] = API_KEY;
   }
   return h;
+}
+
+async function requestJson(path, options = {}) {
+  const res = await debugFetch(`${BASE_URL}${path}`, options);
+  const text = await res.text().catch(() => '');
+  let parsed = null;
+  if (text) {
+    try { parsed = JSON.parse(text); } catch (e) { parsed = text; }
+  }
+  if (!res.ok) {
+    const msg = parsed && typeof parsed === 'object' && (parsed.error || parsed.message) ? (parsed.error || parsed.message) : text || `status ${res.status}`;
+    throw new Error(msg);
+  }
+  return parsed;
+}
+
+function normalizeGroupsPayload(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.groups)) return payload.groups;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (payload.data && Array.isArray(payload.data.groups)) return payload.data.groups;
+  if (payload.result && Array.isArray(payload.result.groups)) return payload.result.groups;
+  return [];
 }
 
 // debug fetch forcing no-store to avoid 304 issues
@@ -100,7 +133,17 @@ export const api = {
 
       const groupRes = await debugFetch(`${BASE_URL}/api/groups/me`, { method: 'GET' });
       let groupInfo = null;
-      if (groupRes.ok) groupInfo = (await groupRes.json()).group || {};
+      if (groupRes.ok) {
+        const groupBody = await groupRes.json().catch(() => null);
+        groupInfo = (groupBody && (groupBody.group || groupBody.data || groupBody)) || {};
+      }
+
+      const groupsRes = await debugFetch(`${BASE_URL}/api/groups`, { method: 'GET' });
+      let allGroups = [];
+      if (groupsRes.ok) {
+        const groupsBody = await groupsRes.json().catch(() => null);
+        allGroups = normalizeGroupsPayload(groupsBody);
+      }
 
       // collect which mockIds are placed according to server album
       const serverPlacedSet = new Set();
@@ -155,6 +198,7 @@ export const api = {
         inventory: {},
         apiKey: API_KEY,
         groupInfo,
+        allGroups,
         rawCatalog: cardsJson,
         rawAlbum: albumJson
       };
@@ -242,6 +286,130 @@ export const api = {
       console.error('[api] stickCard error', err);
       return { ok: false, error: String(err) };
     }
+  },
+
+  async listTrades() {
+    if (!API_KEY) return { ok: false, offers: [], error: 'Sin API key configurada' };
+
+    try {
+      const payload = await requestJson('/api/trades', { method: 'GET' });
+      const offers = Array.isArray(payload)
+        ? payload
+        : (payload && Array.isArray(payload.trades)
+          ? payload.trades
+          : (payload && Array.isArray(payload.data)
+            ? payload.data
+            : (payload && Array.isArray(payload.offers)
+              ? payload.offers
+              : [])));
+      return { ok: true, offers, raw: payload };
+    } catch (err) {
+      return { ok: false, offers: [], error: err && err.message ? err.message : 'No se pudieron cargar las ofertas' };
+    }
+  },
+
+  async createTrade(payload = {}) {
+    if (!API_KEY) return { ok: false, error: 'Sin API key configurada' };
+    // Use a single canonical payload to avoid ambiguous server errors
+    const bodyPayload = {
+      offeredCardCode: payload.offeredCardCode,
+      requestedCardCode: payload.requestedCardCode,
+      targetGroupId: payload.targetGroupId
+    };
+    try { console.info('[api.createTrade] sending canonical payload', JSON.stringify(bodyPayload)); } catch (e) { console.info('[api.createTrade] sending canonical payload', bodyPayload); }
+    try {
+      const res = await debugFetch(`${BASE_URL}/api/trades`, { method: 'POST', body: JSON.stringify(bodyPayload) });
+      let text = '';
+      try { text = await res.text(); } catch (e) { text = ''; }
+      if (res.ok) {
+        let parsed = null;
+        try { parsed = text ? JSON.parse(text) : null; } catch (e) { parsed = text; }
+        return { ok: true, result: parsed, payload: bodyPayload };
+      }
+      const msg = text || `status ${res.status}`;
+      console.error('[api.createTrade] server rejected payload', { bodyPayload, status: res.status, body: text });
+      return { ok: false, error: msg };
+    } catch (err) {
+      console.error('[api.createTrade] network/error', err);
+      return { ok: false, error: err && err.message ? err.message : String(err) };
+    }
+  },
+
+  async updateTrade(tradeId, action) {
+    if (!tradeId) return { ok: false, error: 'Falta el id de la oferta' };
+    if (!API_KEY) return { ok: false, error: 'Sin API key configurada' };
+
+    const actionKey = String(action || '').toLowerCase();
+    let endpoint;
+    if (actionKey === 'accept') endpoint = `/api/trades/${tradeId}/accept`;
+    else if (actionKey === 'reject') endpoint = `/api/trades/${tradeId}/reject`;
+    else if (actionKey === 'cancel') endpoint = `/api/trades/${tradeId}/cancel`;
+    else return { ok: false, error: 'Acción de intercambio no válida' };
+
+    try {
+      const result = await requestJson(endpoint, { method: 'POST' });
+      return { ok: true, result };
+    } catch (err) {
+      return { ok: false, error: err && err.message ? err.message : 'No se pudo actualizar la oferta' };
+    }
+  },
+
+  async listGroups() {
+    if (!API_KEY) return { ok: false, groups: [], error: 'Sin API key configurada' };
+    try {
+      const payload = await requestJson('/api/groups', { method: 'GET' });
+      const groups = normalizeGroupsPayload(payload);
+      return { ok: true, groups };
+    } catch (err) {
+      return { ok: false, groups: [], error: err && err.message ? err.message : 'No se pudieron cargar los grupos' };
+    }
+  },
+
+  // Try to fetch duplicates/inventory for a given group id. Returns set of API codes.
+  async getGroupDuplicates(groupId) {
+    if (!API_KEY) return { ok: false, codes: [], error: 'Sin API key configurada' };
+    if (!groupId) return { ok: false, codes: [], error: 'Falta groupId' };
+    const tryUrls = [
+      `/api/groups/${groupId}/duplicates`,
+      `/api/groups/${groupId}/inventory`,
+      `/api/groups/${groupId}`
+    ];
+    let lastErr = null;
+    for (const url of tryUrls) {
+      try {
+        const res = await debugFetch(`${BASE_URL}${url}`, { method: 'GET' });
+        if (!res.ok) {
+          let t = '';
+          try { t = await res.text(); } catch (e) { t = ''; }
+          lastErr = new Error(t || `status ${res.status}`);
+          continue;
+        }
+        const body = await res.json().catch(() => null);
+        const codesSet = new Set();
+        // recursive collector
+        (function collect(o) {
+          if (!o) return;
+          if (typeof o === 'string') {
+            // simple pattern like ARG-1
+            const s = o.trim();
+            if (s.match(/^[A-Za-z]{2,4}-\d+$/)) codesSet.add(s.toUpperCase());
+            return;
+          }
+          if (Array.isArray(o)) return o.forEach(collect);
+          if (typeof o === 'object') {
+            // common fields
+            const cands = [o.code, o.id, o.cardCode, o.card_code, o.apiCode, o.api_code, o.countryCode];
+            cands.forEach(v => { if (v && typeof v === 'string' && v.trim()) { if (v.match(/^[A-Za-z]{2,4}-\d+$/)) codesSet.add(v.toUpperCase()); } });
+            // dive deeper
+            Object.values(o).forEach(collect);
+          }
+        })(body);
+        return { ok: true, codes: Array.from(codesSet) };
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    return { ok: false, codes: [], error: lastErr && lastErr.message ? lastErr.message : 'No se pudo obtener duplicados del grupo' };
   },
 
   async saveState(stateObj) {

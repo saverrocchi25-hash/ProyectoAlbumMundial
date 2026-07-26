@@ -5,7 +5,7 @@
 // - Mantiene la vista por selección, duplicados y reconciliación.
 
 import { allStickers } from './mockData.js';
-import { api } from './api.js';
+import { api, mockIdToApiCode } from './api.js';
 // ----------------- IMAGE GENERATION & CACHE HELPERS -----------------
 
 // Deterministic color picker por string
@@ -81,6 +81,10 @@ const myDuplicateSelect = document.getElementById('my-duplicate-select');
 const desiredSelect = document.getElementById('desired-select');
 const sendOfferBtn = document.getElementById('send-offer');
 const incomingOffers = document.getElementById('incoming-offers');
+const outgoingOffers = document.getElementById('outgoing-offers');
+const historyOffers = document.getElementById('history-offers');
+const refreshTradesBtn = document.getElementById('refresh-trades');
+const tradeTabs = Array.from(document.querySelectorAll('.trade-tab'));
 
 const toastContainer = document.getElementById('toast-container');
 
@@ -94,13 +98,15 @@ let state = null;
 let currentPack = [];
 let catalogByApiCountry = {};
 let catalogCardByMockId = {};
+let pendingOutgoing = []; // locally tracked outgoing offers created by this client
 
 /* ---------- Helpers ---------- */
 function showToast(msg, opts = {}) {
   const t = document.createElement('div');
   t.className = 'toast';
-  if (opts.type === 'danger') t.style.background = 'linear-gradient(90deg,#ef4444,#dc2626)';
-  if (opts.type === 'success') t.style.background = 'linear-gradient(90deg,#16a34a,#059669)';
+  const kind = opts.type || (opts.success ? 'success' : 'info');
+  if (kind === 'danger') t.style.background = 'linear-gradient(90deg,#ef4444,#dc2626)';
+  if (kind === 'success') t.style.background = 'linear-gradient(90deg,#16a34a,#059669)';
   t.textContent = msg;
   toastContainer && toastContainer.appendChild(t);
   setTimeout(() => t.remove(), opts.duration || 2200);
@@ -116,12 +122,22 @@ function apiCodeToMockId(apiCode) {
   return `${country}-${String(num - 1).padStart(2, '0')}`;
 }
 function getFullName(card) {
-  if (!card) return null;
+  if (!card && card !== 0) return '';
+  if (typeof card === 'string') return card;
+  if (typeof card === 'number') return String(card);
   if (card.fullName) return card.fullName;
   if (card.playerName) return card.playerName;
   if (card.name) return card.name;
+  if (card.title) return card.title;
+  if (card.label) return card.label;
+  if (card.card) return getTradeLabel(card.card);
+  if (card.player) return getTradeLabel(card.player);
+  if (card.sticker) return getTradeLabel(card.sticker);
+  if (card.source) return getTradeLabel(card.source);
+  if (card.target) return getTradeLabel(card.target);
   if (card.firstName || card.lastName) return `${card.firstName || ''}${card.firstName && card.lastName ? ' ' : ''}${card.lastName || ''}`.trim();
-  return card.code || card.id || '';
+  if (card.code || card.id) return String(card.code || card.id);
+  try { return JSON.stringify(card); } catch (e) { return String(card); }
 }
 
 /* ---------- Funciones que deben existir pronto ---------- */
@@ -432,8 +448,9 @@ function renderDuplicates() {
   duplicatesList.innerHTML = '';
   duplicatesList.classList.add('stickers-grid');
   let total = 0;
-  for (const id of Object.keys(state.duplicates || {})) {
-    const count = state.duplicates[id] || 0;
+  const dupMap = (state && state.duplicates) ? state.duplicates : {};
+  for (const id of Object.keys(dupMap)) {
+    const count = dupMap[id] || 0;
     if (count <= 0) continue;
     total += count;
     const info = { id };
@@ -446,6 +463,385 @@ function renderDuplicates() {
     duplicatesList.appendChild(card);
   }
   if (dupCountSpan) dupCountSpan.textContent = String(total);
+}
+
+function getTradeLabel(card) {
+  if (card === null || card === undefined) return '';
+  if (typeof card === 'string' || typeof card === 'number') return String(card);
+  if (Array.isArray(card) && card.length) return getTradeLabel(card[0]);
+  if (typeof card === 'object') {
+    const candidate = card.fullName || card.playerName || card.name || card.title || card.label || card.displayName || card.groupName || card.description || card.value;
+    if (candidate) return String(candidate);
+    if (card.code || card.id) return String(card.code || card.id);
+    if (card.card || card.sticker || card.player || card.source || card.target) return getTradeLabel(card.card || card.sticker || card.player || card.source || card.target);
+    const stringKey = Object.keys(card).find(k => typeof card[k] === 'string' && card[k].trim());
+    if (stringKey) return String(card[stringKey]);
+    const numberKey = Object.keys(card).find(k => typeof card[k] === 'number');
+    if (numberKey) return String(card[numberKey]);
+    try { return JSON.stringify(card); } catch (e) { return String(card); }
+  }
+  return String(card);
+}
+
+function getGroupLabel(group) {
+  if (group === null || group === undefined) return '';
+  if (typeof group === 'string' || typeof group === 'number') return String(group);
+  if (Array.isArray(group) && group.length) return getGroupLabel(group[0]);
+  if (typeof group === 'object') {
+    if (group.name) return String(group.name);
+    if (group.groupName) return String(group.groupName);
+    if (group.displayName) return String(group.displayName);
+    if (group.code) return String(group.code);
+    if (group.id && typeof group.id !== 'object') return String(group.id);
+    if (group.id && typeof group.id === 'object') return getGroupLabel(group.id);
+    if (group.label) return String(group.label);
+    return getTradeLabel(group);
+  }
+  return String(group);
+}
+
+function getGroupId(group) {
+  if (group === null || group === undefined) return '';
+  if (typeof group === 'string' || typeof group === 'number') return String(group);
+  if (Array.isArray(group) && group.length) return getGroupId(group[0]);
+  if (typeof group === 'object') {
+    if (group._id && (typeof group._id === 'string' || typeof group._id === 'number')) return String(group._id);
+    if (group.id && typeof group.id !== 'object') return String(group.id);
+    if (group.id) return getGroupId(group.id);
+    if (group.groupId && typeof group.groupId !== 'object') return String(group.groupId);
+    if (group.groupId) return getGroupId(group.groupId);
+    if (group.group_id && (typeof group.group_id === 'string' || typeof group.group_id === 'number')) return String(group.group_id);
+    if (group.code && typeof group.code !== 'object') return String(group.code);
+    if (group.name && typeof group.name !== 'object') return String(group.name);
+    return '';
+  }
+  return '';
+}
+
+function getTradeCardInfo(card) {
+  if (!card && card !== 0) return { label: '', code: '' };
+  if (typeof card === 'string' || typeof card === 'number') {
+    const s = String(card);
+    // If it's an API code like ARG-1, try to map to catalog name
+    if (s.match(/^[A-Za-z]{2,4}-\d+$/)) {
+      const mockId = apiCodeToMockId(s);
+      const apiCard = catalogCardByMockId[mockId];
+      const name = (apiCard && getFullName(apiCard)) || (allStickers[mockId] && allStickers[mockId].nombre);
+      return { label: name || s, code: s };
+    }
+    return { label: s, code: s };
+  }
+  const label = getTradeLabel(card);
+  let code = '';
+  if (typeof card === 'object' && card !== null) {
+    code = card.code || card.id || (card.card && (card.card.code || card.card.id)) || (card.sticker && (card.sticker.code || card.sticker.id)) || (card.player && (card.player.code || card.player.id)) || '';
+    // If code present, try to map to catalog name
+    if (code && typeof code === 'string' && code.match(/^[A-Za-z]{2,4}-\d+$/)) {
+      const mockId = apiCodeToMockId(code);
+      const apiCard = catalogCardByMockId[mockId];
+      const name = (apiCard && getFullName(apiCard)) || (allStickers[mockId] && allStickers[mockId].nombre);
+      return { label: name || getTradeLabel(card) || code, code: String(code) };
+    }
+  }
+  return { label, code: code ? String(code) : '' };
+}
+
+function buildOfferCard(offer, kind) {
+  const card = document.createElement('article');
+  card.className = 'offer-card';
+
+  const offered = offer.offeredCard || offer.offeredSticker || offer.giveCard || offer.givenCard || offer.offerCard || offer.cardOffered || offer.fromCard || offer.offered || offer.give || offer.offer || null;
+  const wanted = offer.requestedCard || offer.requestedSticker || offer.wantCard || offer.wantedCard || offer.cardRequested || offer.toCard || offer.requested || offer.want || offer.desired || null;
+  const group = offer.group || offer.groupName || offer.fromGroup || offer.senderGroup || offer.sourceGroup || '';
+  const toGroup = offer.toGroup || offer.targetGroup || offer.receivingGroup || offer.destinationGroup || offer.target || '';
+  const status = (offer.status || offer.state || '').toString().toUpperCase();
+
+  const offeredInfo = getTradeCardInfo(offered);
+  const wantedInfo = getTradeCardInfo(wanted);
+  const groupLabel = getGroupLabel(group);
+  const toGroupLabel = getGroupLabel(toGroup);
+  // If server didn't provide origin group but this is an outgoing trade we sent, show our group as origin
+  let finalGroupLabel = groupLabel;
+  if (!finalGroupLabel && kind === 'outgoing') {
+    finalGroupLabel = getGroupLabel(state.groupInfo) || finalGroupLabel;
+  }
+
+  const heading = document.createElement('header');
+  const title = document.createElement('strong');
+  title.textContent = `${groupLabel || toGroupLabel || 'Intercambio'} · ${status || 'PENDIENTE'}`;
+  const badge = document.createElement('span');
+  badge.className = 'offer-status';
+  badge.textContent = status || 'PENDING';
+  heading.append(title, badge);
+
+  const meta = document.createElement('div');
+  meta.className = 'offer-meta';
+  const groupRow = document.createElement('div');
+  groupRow.innerHTML = `<strong>Grupo origen:</strong> ${finalGroupLabel || 'Sin grupo'}`;
+  const toGroupRow = document.createElement('div');
+  if (toGroupLabel) toGroupRow.innerHTML = `<strong>Grupo destino:</strong> ${toGroupLabel}`;
+  const wantRow = document.createElement('div');
+  wantRow.innerHTML = `<strong>Quieren:</strong> ${wantedInfo.label || 'Sin información'}${wantedInfo.code ? ` (${wantedInfo.code})` : ''}`;
+  const offerRow = document.createElement('div');
+  offerRow.innerHTML = `<strong>Ofrecen:</strong> ${offeredInfo.label || 'Sin información'}${offeredInfo.code ? ` (${offeredInfo.code})` : ''}`;
+  meta.append(groupRow, toGroupRow, wantRow, offerRow);
+
+  const actions = document.createElement('div');
+  actions.className = 'offer-actions';
+
+  if (kind === 'incoming') {
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'accept-btn';
+    acceptBtn.textContent = 'Aceptar';
+    acceptBtn.addEventListener('click', async () => {
+      await handleTradeAction(offer, 'accept');
+    });
+
+    const rejectBtn = document.createElement('button');
+    rejectBtn.className = 'reject-btn';
+    rejectBtn.textContent = 'Rechazar';
+    rejectBtn.addEventListener('click', async () => {
+      await handleTradeAction(offer, 'reject');
+    });
+
+    actions.append(acceptBtn, rejectBtn);
+  } else if (kind === 'outgoing') {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cancel-btn';
+    cancelBtn.textContent = 'Cancelar';
+    cancelBtn.addEventListener('click', async () => {
+      await handleTradeAction(offer, 'cancel');
+    });
+    actions.append(cancelBtn);
+  }
+
+  card.append(heading, meta, actions);
+  return card;
+}
+
+function renderTradeList(listEl, offers, kind) {
+  listEl.innerHTML = '';
+  if (!offers || !offers.length) {
+    const empty = document.createElement('div');
+    empty.className = 'offer-empty';
+    empty.textContent = kind === 'incoming' ? 'No tienes ofertas entrantes pendientes.' : (kind === 'outgoing' ? 'No tienes ofertas salientes.' : 'No hay historial todavía.');
+    listEl.appendChild(empty);
+    return;
+  }
+
+  offers.forEach((offer) => {
+    listEl.appendChild(buildOfferCard(offer, kind));
+  });
+}
+
+function normalizeStatus(offer) {
+  return String(offer.status || offer.state || '').toUpperCase();
+}
+
+function isIncomingTrade(offer) {
+  if (!offer) return false;
+  const direction = String(offer.direction || offer.type || '').toLowerCase();
+  if (['incoming', 'received', 'inbound'].includes(direction)) return true;
+  if (['outgoing', 'sent', 'outbound'].includes(direction)) return false;
+  const myGroupId = getGroupId(state.groupInfo) || '';
+  const toGroupRaw = offer.toGroup || offer.targetGroup || offer.group || offer.receivingGroup || offer.target || offer.destinationGroup || offer.to || null;
+  const fromGroupRaw = offer.fromGroup || offer.senderGroup || offer.sourceGroup || offer.origin || offer.from || null;
+  const toGroup = String(getGroupId(toGroupRaw) || '').toLowerCase();
+  const fromGroup = String(getGroupId(fromGroupRaw) || '').toLowerCase();
+  if (myGroupId) {
+    const own = String(myGroupId).toLowerCase();
+    if (toGroup === own && fromGroup !== own) return true;
+    if (fromGroup === own && toGroup !== own) return false;
+  }
+  return !['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(normalizeStatus(offer));
+}
+
+function isOutgoingTrade(offer) {
+  if (!offer) return false;
+  const direction = String(offer.direction || offer.type || '').toLowerCase();
+  if (['outgoing', 'sent', 'outbound'].includes(direction)) return true;
+  if (['incoming', 'received', 'inbound'].includes(direction)) return false;
+  const myGroupId = getGroupId(state.groupInfo) || '';
+  const toGroupRaw = offer.toGroup || offer.targetGroup || offer.group || offer.receivingGroup || offer.target || offer.destinationGroup || offer.to || null;
+  const fromGroupRaw = offer.fromGroup || offer.senderGroup || offer.sourceGroup || offer.origin || offer.from || null;
+  const toGroup = String(getGroupId(toGroupRaw) || '').toLowerCase();
+  const fromGroup = String(getGroupId(fromGroupRaw) || '').toLowerCase();
+  if (myGroupId) {
+    const own = String(myGroupId).toLowerCase();
+    if (fromGroup === own && toGroup !== own) return true;
+    if (toGroup === own && fromGroup !== own) return false;
+  }
+  return false;
+}
+
+async function loadTrades(force = false) {
+  if (!incomingOffers || !outgoingOffers || !historyOffers) return;
+
+  const toRender = async (container, kind) => {
+    container.innerHTML = '<div class="offer-empty">Cargando ofertas…</div>';
+    if (!api.isRemote()) {
+      container.innerHTML = '<div class="offer-empty">Introduce tu API key para cargar ofertas reales del backend.</div>';
+      return;
+    }
+    const result = await api.listTrades();
+    if (!result.ok) {
+      container.innerHTML = `<div class="offer-empty">${result.error || 'No se pudieron cargar las ofertas.'}</div>`;
+      return;
+    }
+    const offers = Array.isArray(result.offers) ? result.offers : [];
+    const filtered = offers.filter((offer) => {
+      const status = normalizeStatus(offer);
+      if (kind === 'incoming') {
+        return isIncomingTrade(offer) && !['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(status);
+      }
+      if (kind === 'outgoing') {
+        return isOutgoingTrade(offer) && !['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(status);
+      }
+      return ['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(status);
+    });
+    // append any locally pending outgoing offers so they appear immediately
+    let merged = filtered;
+    if (kind === 'outgoing' && pendingOutgoing && pendingOutgoing.length) {
+      // only add those not present in server list (by comparing a tuple of codes+target)
+      const existingKeys = new Set(filtered.map(o => {
+        const of = (o.offeredCardCode || o.offeredCard || (o.offered && (o.offered.code || o.offered.id)) || '').toString();
+        const req = (o.requestedCardCode || o.requestedCard || (o.requested && (o.requested.code || o.requested.id)) || '').toString();
+        const tgt = String(getGroupId(o.toGroup || o.targetGroup || o.to || o.target || o.group || o.receivingGroup) || '');
+        return `${of}::${req}::${tgt}`;
+      }));
+      const toAdd = pendingOutgoing.filter(p => {
+        const key = `${p.offeredCardCode || ''}::${p.requestedCardCode || ''}::${p.targetGroupId || ''}`;
+        return !existingKeys.has(key);
+      });
+      merged = filtered.concat(toAdd.map(p => p));
+    }
+    renderTradeList(container, filtered, kind);
+  };
+
+  await Promise.all([
+    toRender(incomingOffers, 'incoming'),
+    toRender(outgoingOffers, 'outgoing'),
+    toRender(historyOffers, 'history')
+  ]);
+}
+
+async function loadGroups() {
+  if (!api.isRemote()) {
+    state.allGroups = [];
+    populateTradeSelectors();
+    return;
+  }
+  const result = await api.listGroups();
+  if (!result.ok) {
+    console.warn('[groups] failed to load groups', result.error);
+    state.allGroups = [];
+    populateTradeSelectors();
+    return;
+  }
+  state.allGroups = result.groups || [];
+  try { console.info('[groups] loaded', JSON.stringify(state.allGroups)); } catch (e) { console.info('[groups] loaded (unserializable)', state.allGroups); }
+  populateTradeSelectors();
+}
+
+async function handleTradeAction(offer, action) {
+  const tradeId = offer.id || offer.tradeId || offer.offerId || offer._id;
+  if (!tradeId) {
+    showToast('Esta oferta no tiene un identificador válido.', { type: 'danger' });
+    return;
+  }
+
+  try {
+    const result = await api.updateTrade(tradeId, action);
+    if (!result || result.ok === false) {
+      const msg = result && result.error ? result.error : 'No se pudo actualizar la oferta.';
+      throw new Error(msg);
+    }
+    showToast(`Oferta ${action === 'accept' ? 'aceptada' : action === 'reject' ? 'rechazada' : 'cancelada'} correctamente.`, { success: true });
+    await loadTrades(true);
+  } catch (err) {
+    showToast(err && err.message ? err.message : 'No se pudo actualizar la oferta.', { type: 'danger' });
+  }
+}
+
+async function submitTradeOffer() {
+  const myDuplicate = myDuplicateSelect && myDuplicateSelect.value;
+  const desired = desiredSelect && desiredSelect.value;
+  const targetGroup = document.getElementById('target-group')?.value || '';
+  if (!myDuplicate || !desired || !targetGroup) {
+    showToast('Selecciona una repetida, una carta deseada y un grupo destino.', { type: 'danger' });
+    return;
+  }
+
+  try {
+    // Resolve the actual backend id from the selected option (we store the whole group object as option.value)
+    let targetGroupIdValue = targetGroup;
+    try {
+      const parsed = JSON.parse(targetGroup);
+      const resolved = getGroupId(parsed) || parsed.groupId || parsed.id || parsed._id || parsed.group_id || parsed.name || parsed.code || '';
+      targetGroupIdValue = String(resolved || '');
+    } catch (e) {
+      targetGroupIdValue = String(targetGroup || '');
+    }
+
+    const payload = {
+      offeredCardCode: mockIdToApiCode(myDuplicate),
+      requestedCardCode: mockIdToApiCode(desired),
+      targetGroupId: targetGroupIdValue
+    };
+    try { console.info('[trade] sending payload to api.createTrade', JSON.stringify(payload)); } catch (e) { console.info('[trade] sending payload to api.createTrade', payload, { myDuplicate, desired, targetGroup }); }
+    if (!payload.offeredCardCode || !payload.requestedCardCode || !payload.targetGroupId) {
+      console.error('[trade] missing payload field', payload);
+      showToast('Faltan campos obligatorios para crear la oferta.', { type: 'danger' });
+      return;
+    }
+    const result = await api.createTrade(payload);
+    if (!result || result.ok === false) {
+      const message = result && result.error ? result.error : 'No se pudo crear la oferta.';
+      console.error('[trade] failed payload', payload, result);
+      throw new Error(message);
+    }
+    // optimistic: add to pendingOutgoing so it appears under 'Ofertas que envío' immediately
+    try {
+      const myGroup = state.groupInfo || {};
+      const toGroupObj = (() => {
+        try { return JSON.parse(targetGroup); } catch (e) { return null; }
+      })();
+      const pending = {
+        id: result.result && result.result.id ? result.result.id : `local-${Date.now()}`,
+        offeredCardCode: payload.offeredCardCode,
+        requestedCardCode: payload.requestedCardCode,
+        targetGroupId: payload.targetGroupId,
+        fromGroup: myGroup,
+        toGroup: toGroupObj || payload.targetGroupId,
+        offeredCard: { code: payload.offeredCardCode },
+        requestedCard: { code: payload.requestedCardCode },
+        status: 'PENDING',
+        direction: 'outgoing'
+      };
+      pendingOutgoing.push(pending);
+    } catch (e) { console.warn('pending outgoing push failed', e); }
+    showToast('Oferta enviada correctamente.', { type: 'success' });
+    await loadTrades(true);
+  } catch (err) {
+    showToast(err && err.message ? err.message : 'No se pudo crear la oferta.', { type: 'danger' });
+  }
+}
+
+function switchTradeTab(tabName) {
+  tradeTabs.forEach((tab) => {
+    const active = tab.dataset.tab === tabName;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+
+  const panels = [incomingOffers, outgoingOffers, historyOffers];
+  panels.forEach((panel) => {
+    if (!panel) return;
+    panel.classList.toggle('hidden', true);
+  });
+
+  const activePanel = tabName === 'outgoing' ? outgoingOffers : (tabName === 'history' ? historyOffers : incomingOffers);
+  if (activePanel) activePanel.classList.remove('hidden');
 }
 
 /* ---------- open pack (con logs) ---------- */
@@ -569,9 +965,11 @@ async function boot() {
   // Attach internal open-pack button to call openPackFlow
   openPackBtn && openPackBtn.addEventListener('click', () => openPackFlow(openPackBtn));
   btnDuplicates && btnDuplicates.addEventListener('click', () => { showView('duplicates-view', btnDuplicates); renderDuplicates(); });
-  btnTrades && btnTrades.addEventListener('click', () => showView('trades-view', btnTrades));
+  btnTrades && btnTrades.addEventListener('click', () => { showView('trades-view', btnTrades); loadTrades(true); });
 
   state = await api.getInitialState();
+
+  await loadGroups();
 
   catalogByApiCountry = {}; catalogCardByMockId = {};
   try {
@@ -595,6 +993,8 @@ async function boot() {
   if (repair.moved && repair.moved.length) showToast(`${repair.moved.length} repetida(s) pegada(s) automáticamente`, { duration: 2200 });
 
   updateDupCount(); renderAlbum(); renderDuplicates(); populateTradeSelectors();
+  await loadTrades(true);
+  switchTradeTab('incoming');
 
   if (typeof window !== 'undefined') {
     window.appState = () => state;
@@ -636,4 +1036,91 @@ function populateTradeSelectors() {
       }
     }
   }
+
+  // attach change listener to targetGroup to filter desiredSelect by group's duplicates
+  const targetGroupEl = document.getElementById('target-group');
+  if (targetGroupEl) {
+    targetGroupEl.removeEventListener('change', onTargetGroupChange);
+    targetGroupEl.addEventListener('change', onTargetGroupChange);
+  }
+
+
+async function onTargetGroupChange(e) {
+  const val = e.target.value || '';
+  let groupId = '';
+  try { const parsed = JSON.parse(val); groupId = getGroupId(parsed) || parsed.id || parsed._id || parsed.groupId || parsed.group_id || parsed.code || ''; } catch (err) { groupId = val; }
+  await updateDesiredSelectForGroup(String(groupId || ''));
 }
+
+async function updateDesiredSelectForGroup(groupId) {
+  if (!desiredSelect) return;
+  if (!groupId) {
+    // repopulate full list
+    populateTradeSelectors();
+    return;
+  }
+  if (!api.isRemote()) return;
+  const res = await api.getGroupDuplicates(groupId);
+  if (!res || res.ok === false) {
+    console.warn('[groups] duplicates fetch failed', res && res.error);
+    // show message and keep full list
+    showToast('No se pudo comprobar duplicadas del grupo destino.', { type: 'danger' });
+    return;
+  }
+  const codes = new Set((res.codes || []).map(c => String(c).toUpperCase()));
+  desiredSelect.innerHTML = '';
+  for (const apiC of Object.keys(state.album || {})) {
+    const albumCountry = state.album[apiC] || { missing: [] };
+    for (const id of albumCountry.missing) {
+      const apiCode = mockIdToApiCode(id);
+      if (!apiCode) continue;
+      if (!codes.has(String(apiCode).toUpperCase())) continue; // only those the group has
+      const display = (catalogCardByMockId[id] && getFullName(catalogCardByMockId[id])) || (allStickers[id] && allStickers[id].nombre) || id;
+      const opt = document.createElement('option'); opt.value = id; opt.textContent = `${id} — ${apiC} / ${display}`;
+      desiredSelect.appendChild(opt);
+    }
+  }
+  if (!desiredSelect.children.length) {
+    const opt = document.createElement('option'); opt.value = ''; opt.textContent = '(El grupo destino no tiene repetidas disponibles)'; desiredSelect.appendChild(opt);
+  }
+}
+  const targetGroup = document.getElementById('target-group');
+  if (targetGroup) {
+    targetGroup.innerHTML = '';
+    if (!api.isRemote()) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Introduce tu API key para cargar grupos del backend';
+      targetGroup.appendChild(opt);
+      return;
+    }
+    const allGroups = state.allGroups || [];
+    const ownId = getGroupId(state.groupInfo);
+    const groups = allGroups.filter(g => {
+      const gid = getGroupId(g).trim().toLowerCase();
+      return gid && gid !== ownId.trim().toLowerCase();
+    });
+    if (!groups.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(No hay grupos disponibles)';
+      targetGroup.appendChild(opt);
+    } else {
+      for (const group of groups) {
+        const gid = getGroupId(group);
+        const name = getGroupLabel(group);
+        const opt = document.createElement('option');
+        // store the whole group object in the option value so we can extract the real id at submit time
+        try { opt.value = JSON.stringify(group); } catch (e) { opt.value = String(gid || name || ''); }
+        opt.textContent = name || String(gid);
+        // store normalized id for quick access too
+        opt.dataset.groupId = String(gid || '');
+        targetGroup.appendChild(opt);
+      }
+    }
+  }
+}
+
+if (sendOfferBtn) sendOfferBtn.addEventListener('click', submitTradeOffer);
+if (refreshTradesBtn) refreshTradesBtn.addEventListener('click', () => loadTrades(true));
+tradeTabs.forEach((tab) => tab.addEventListener('click', () => switchTradeTab(tab.dataset.tab)));
