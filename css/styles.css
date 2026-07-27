@@ -127,11 +127,12 @@ body {
   overflow:visible;
 }
 .sticker-slot img, .sticker-card .sticker-img {
-  max-height:72px;
-  max-width:100%;
-  object-fit:contain;
-  display:block;
-  transition:transform .28s ease, filter .18s ease;
+  width: 100%;
+  height: auto;           /* dejar que la altura se ajuste */
+  max-height: 96px;       /* limitamos la altura máxima para preservar layout */
+  object-fit: contain;    /* mantener relación de aspecto sin recortar */
+  display: block;
+  transition: transform .28s ease, filter .18s ease;
 }
 .sticker-slot:hover img { transform:translateY(-4px) scale(1.02); }
 .sticker-empty img { opacity:0.46; filter:grayscale(72%); }
@@ -279,8 +280,16 @@ button:focus-visible, select:focus-visible { outline:3px solid rgba(11,110,253,0
 /* small screen adjustments */
 @media(max-width:420px) {
   .stickers-grid { grid-template-columns: repeat(4,1fr); }
-  .sticker-slot { min-height:100px; }
-  .sticker-card { width:100px; }
+.sticker-slot {
+  min-height: 132px; /* espacio suficiente para imagen + caption */
+  padding: 10px;
+}
+/* Ajuste para tarjetas (template) */
+.sticker-card {
+  width: 120px;
+  padding: 6px;
+  box-sizing: border-box;
+}
   .country-grid { grid-template-columns: repeat(2, 1fr); gap:10px; }
 }
 
@@ -298,11 +307,7 @@ button:focus-visible, select:focus-visible { outline:3px solid rgba(11,110,253,0
 }
 
 /* Aseguramos que las tarjetas small puedan mostrar 3 líneas y tengan ancho consistente */
-.sticker-card.small {
-  width: 140px;            /* ancho fijo razonable para repetidas */
-  padding: 8px;
-}
-
+.sticker-card.small { width: 140px; padding: 8px; }
 .sticker-card.small .sticker-caption {
   -webkit-line-clamp: 3;   /* hasta 3 líneas en repetidas */
   font-size: 0.95rem;

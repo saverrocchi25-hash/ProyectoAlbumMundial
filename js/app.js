@@ -550,25 +550,74 @@ function buildOfferCard(offer, kind) {
   const card = document.createElement('article');
   card.className = 'offer-card';
 
-  const offered = offer.offeredCard || offer.offeredSticker || offer.giveCard || offer.givenCard || offer.offerCard || offer.cardOffered || offer.fromCard || offer.offered || offer.give || offer.offer || null;
-  const wanted = offer.requestedCard || offer.requestedSticker || offer.wantCard || offer.wantedCard || offer.cardRequested || offer.toCard || offer.requested || offer.want || offer.desired || null;
-  const group = offer.group || offer.groupName || offer.fromGroup || offer.senderGroup || offer.sourceGroup || '';
-  const toGroup = offer.toGroup || offer.targetGroup || offer.receivingGroup || offer.destinationGroup || offer.target || '';
+  // Función helper para obtener label desde objetos/variantes múltiples
+  function deriveGroupLabel(obj) {
+    if (!obj) return '';
+    // si es string/number directo
+    if (typeof obj === 'string' || typeof obj === 'number') return String(obj);
+    // campos comunes
+    const cand = obj.name || obj.groupName || obj.displayName || obj.label || obj.title || obj.code || obj.id || obj.group || obj.groupName;
+    if (cand) return String(cand);
+    // campos anidados
+    if (obj.user) return deriveGroupLabel(obj.user);
+    if (obj.group) return deriveGroupLabel(obj.group);
+    if (obj.from) return deriveGroupLabel(obj.from);
+    if (obj.sender) return deriveGroupLabel(obj.sender);
+    // try first string property
+    const sk = Object.keys(obj).find(k => typeof obj[k] === 'string' && obj[k].trim());
+    if (sk) return String(obj[sk]);
+    return '';
+  }
+
+  // Extraer origin / target con variantes posibles (plan: probar muchos campos)
+  const fromRaw = offer.fromGroup || offer.from || offer.sender || offer.createdBy || offer.initiator || offer.owner || offer.source || offer.group || offer.user || offer.meta && offer.meta.from || null;
+  const toRaw   = offer.toGroup   || offer.targetGroup || offer.to   || offer.destinationGroup || offer.receivingGroup || offer.target || offer.group || offer.destination || offer.meta && offer.meta.to || null;
+
+  // Normalize card fields (many name variants)
+  const offered = offer.offeredCard || offer.offeredSticker || offer.giveCard || offer.givenCard ||
+                  offer.offerCard || offer.cardOffered || offer.fromCard || offer.offered || offer.give ||
+                  offer.offeredCardCode || offer.offered_code || offer.offeredCode || offer.offeredId ||
+                  (offer.offer && (offer.offer.offeredCard || offer.offer.code || offer.offer.id)) ||
+                  null;
+
+  const wanted = offer.requestedCard || offer.requestedSticker || offer.wantCard || offer.wantedCard ||
+                 offer.cardRequested || offer.toCard || offer.requested || offer.want ||
+                 offer.requestedCardCode || offer.requested_code || offer.requestedCode || offer.requestedId ||
+                 (offer.request && (offer.request.card || offer.request.code || offer.request.id)) ||
+                 null;
+
   const status = (offer.status || offer.state || '').toString().toUpperCase();
 
-  const offeredInfo = getTradeCardInfo(offered);
-  const wantedInfo = getTradeCardInfo(wanted);
-  const groupLabel = getGroupLabel(group);
-  const toGroupLabel = getGroupLabel(toGroup);
+  const offeredInfo = getTradeCardInfo(offered || offer.offeredCardCode || offer.offered || offer.offeredCode || offered);
+  const wantedInfo  = getTradeCardInfo(wanted  || offer.requestedCardCode || offer.requested || offer.requestedCode || wanted);
+
+  // Try many ways to show group labels (prefer human name)
+  let groupLabel = deriveGroupLabel(fromRaw) || deriveGroupLabel(offer.fromGroup) || deriveGroupLabel(offer.sender) || deriveGroupLabel(offer.createdBy) || deriveGroupLabel(offer.initiator) || deriveGroupLabel(offer.owner);
+  let toGroupLabel = deriveGroupLabel(toRaw) || deriveGroupLabel(offer.toGroup) || deriveGroupLabel(offer.targetGroup) || deriveGroupLabel(offer.receivingGroup);
+
+  // If still empty, try getGroupLabel/getGroupId helpers (they are tolerant)
+  if (!groupLabel) {
+    const g = fromRaw || offer.from || offer.sender || offer.createdBy || offer.initiator || offer.owner || offer.source || null;
+    groupLabel = getGroupLabel(g) || '';
+  }
+  if (!toGroupLabel) {
+    const tg = toRaw || offer.to || offer.target || offer.destinationGroup || null;
+    toGroupLabel = getGroupLabel(tg) || '';
+  }
+
   // If server didn't provide origin group but this is an outgoing trade we sent, show our group as origin
   let finalGroupLabel = groupLabel;
   if (!finalGroupLabel && kind === 'outgoing') {
     finalGroupLabel = getGroupLabel(state.groupInfo) || finalGroupLabel;
   }
+  // As last resort, display something from offer (id or actor)
+  if (!finalGroupLabel) {
+    finalGroupLabel = deriveGroupLabel(offer.from || offer.initiator || offer.owner || offer.createdBy) || '';
+  }
 
   const heading = document.createElement('header');
   const title = document.createElement('strong');
-  title.textContent = `${groupLabel || toGroupLabel || 'Intercambio'} · ${status || 'PENDIENTE'}`;
+  title.textContent = `${finalGroupLabel || toGroupLabel || 'Intercambio'} · ${status || 'PENDIENTE'}`;
   const badge = document.createElement('span');
   badge.className = 'offer-status';
   badge.textContent = status || 'PENDING';
@@ -593,32 +642,25 @@ function buildOfferCard(offer, kind) {
     const acceptBtn = document.createElement('button');
     acceptBtn.className = 'accept-btn';
     acceptBtn.textContent = 'Aceptar';
-    acceptBtn.addEventListener('click', async () => {
-      await handleTradeAction(offer, 'accept');
-    });
+    acceptBtn.addEventListener('click', async () => { await handleTradeAction(offer, 'accept'); });
 
     const rejectBtn = document.createElement('button');
     rejectBtn.className = 'reject-btn';
     rejectBtn.textContent = 'Rechazar';
-    rejectBtn.addEventListener('click', async () => {
-      await handleTradeAction(offer, 'reject');
-    });
+    rejectBtn.addEventListener('click', async () => { await handleTradeAction(offer, 'reject'); });
 
     actions.append(acceptBtn, rejectBtn);
   } else if (kind === 'outgoing') {
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'cancel-btn';
     cancelBtn.textContent = 'Cancelar';
-    cancelBtn.addEventListener('click', async () => {
-      await handleTradeAction(offer, 'cancel');
-    });
+    cancelBtn.addEventListener('click', async () => { await handleTradeAction(offer, 'cancel'); });
     actions.append(cancelBtn);
   }
 
   card.append(heading, meta, actions);
   return card;
 }
-
 function renderTradeList(listEl, offers, kind) {
   listEl.innerHTML = '';
   if (!offers || !offers.length) {
@@ -638,42 +680,39 @@ function normalizeStatus(offer) {
   return String(offer.status || offer.state || '').toUpperCase();
 }
 
-function isIncomingTrade(offer) {
-  if (!offer) return false;
-  const direction = String(offer.direction || offer.type || '').toLowerCase();
-  if (['incoming', 'received', 'inbound'].includes(direction)) return true;
-  if (['outgoing', 'sent', 'outbound'].includes(direction)) return false;
-  const myGroupId = getGroupId(state.groupInfo) || '';
-  const toGroupRaw = offer.toGroup || offer.targetGroup || offer.group || offer.receivingGroup || offer.target || offer.destinationGroup || offer.to || null;
-  const fromGroupRaw = offer.fromGroup || offer.senderGroup || offer.sourceGroup || offer.origin || offer.from || null;
-  const toGroup = String(getGroupId(toGroupRaw) || '').toLowerCase();
-  const fromGroup = String(getGroupId(fromGroupRaw) || '').toLowerCase();
-  if (myGroupId) {
-    const own = String(myGroupId).toLowerCase();
-    if (toGroup === own && fromGroup !== own) return true;
-    if (fromGroup === own && toGroup !== own) return false;
-  }
-  return !['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(normalizeStatus(offer));
-}
+// Determina si una oferta es 'incoming', 'outgoing' o 'other'
+function classifyTrade(offer) {
+  if (!offer) return 'other';
+  const myGroupId = (getGroupId(state.groupInfo) || '').toString().toLowerCase();
 
-function isOutgoingTrade(offer) {
-  if (!offer) return false;
-  const direction = String(offer.direction || offer.type || '').toLowerCase();
-  if (['outgoing', 'sent', 'outbound'].includes(direction)) return true;
-  if (['incoming', 'received', 'inbound'].includes(direction)) return false;
-  const myGroupId = getGroupId(state.groupInfo) || '';
-  const toGroupRaw = offer.toGroup || offer.targetGroup || offer.group || offer.receivingGroup || offer.target || offer.destinationGroup || offer.to || null;
-  const fromGroupRaw = offer.fromGroup || offer.senderGroup || offer.sourceGroup || offer.origin || offer.from || null;
-  const toGroup = String(getGroupId(toGroupRaw) || '').toLowerCase();
-  const fromGroup = String(getGroupId(fromGroupRaw) || '').toLowerCase();
-  if (myGroupId) {
-    const own = String(myGroupId).toLowerCase();
-    if (fromGroup === own && toGroup !== own) return true;
-    if (toGroup === own && fromGroup !== own) return false;
-  }
-  return false;
-}
+  const fromRaw = offer.fromGroup || offer.from || offer.sender || offer.createdBy || offer.initiator || offer.owner || offer.source || offer.group || offer.user || null;
+  const toRaw   = offer.toGroup   || offer.targetGroup || offer.to   || offer.destinationGroup || offer.receivingGroup || offer.target || offer.group || offer.destination || null;
 
+  const fromId = (getGroupId(fromRaw) || '').toString().toLowerCase();
+  const toId   = (getGroupId(toRaw)   || '').toString().toLowerCase();
+
+  // If both sides known, decide deterministically
+  if (fromId && toId) {
+    if (fromId === myGroupId && toId !== myGroupId) return 'outgoing';
+    if (toId === myGroupId && fromId !== myGroupId) return 'incoming';
+  }
+
+  // explicit direction field
+  const direction = String(offer.direction || offer.type || offer.kind || '').toLowerCase();
+  if (['outgoing','sent','outbound'].includes(direction)) return 'outgoing';
+  if (['incoming','received','inbound'].includes(direction)) return 'incoming';
+
+  // actor/creator equals my group => outgoing
+  const actorRaw = offer.actor || offer.initiator || offer.creator || offer.createdBy || null;
+  const actorId = (actorRaw ? (getGroupId(actorRaw) || String(actorRaw)) : '').toString().toLowerCase();
+  if (actorId && myGroupId && actorId === myGroupId) return 'outgoing';
+
+  // if toId matches me => incoming
+  if (toId && myGroupId && toId === myGroupId) return 'incoming';
+  if (fromId && myGroupId && fromId === myGroupId) return 'outgoing';
+
+  return 'other';
+}
 async function loadTrades(force = false) {
   if (!incomingOffers || !outgoingOffers || !historyOffers) return;
 
@@ -688,34 +727,44 @@ async function loadTrades(force = false) {
       container.innerHTML = `<div class="offer-empty">${result.error || 'No se pudieron cargar las ofertas.'}</div>`;
       return;
     }
+
     const offers = Array.isArray(result.offers) ? result.offers : [];
-    const filtered = offers.filter((offer) => {
-      const status = normalizeStatus(offer);
-      if (kind === 'incoming') {
-        return isIncomingTrade(offer) && !['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(status);
-      }
-      if (kind === 'outgoing') {
-        return isOutgoingTrade(offer) && !['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(status);
-      }
-      return ['ACCEPTED', 'REJECTED', 'CANCELLED', 'CANCELED'].includes(status);
+    const finalStatuses = new Set(['ACCEPTED','REJECTED','CANCELLED','CANCELED']);
+
+    // classify offers and force finals into history
+    const items = offers.map(o => {
+      const status = normalizeStatus(o);
+      // if final, treat as history
+      const cls = finalStatuses.has(status) ? 'other' : classifyTrade(o);
+      return { offer: o, cls, status };
     });
-    // append any locally pending outgoing offers so they appear immediately
+
+    const incomingFiltered = items.filter(i => i.cls === 'incoming').map(i => i.offer);
+    const outgoingFiltered = items.filter(i => i.cls === 'outgoing').map(i => i.offer);
+    const historyFiltered = items.filter(i => i.cls === 'other').map(i => i.offer);
+
+    let filtered = [];
+    if (kind === 'incoming') filtered = incomingFiltered;
+    else if (kind === 'outgoing') filtered = outgoingFiltered;
+    else filtered = historyFiltered;
+
+    // append pendingOutgoing for outgoing tab
     let merged = filtered;
     if (kind === 'outgoing' && pendingOutgoing && pendingOutgoing.length) {
-      // only add those not present in server list (by comparing a tuple of codes+target)
       const existingKeys = new Set(filtered.map(o => {
-        const of = (o.offeredCardCode || o.offeredCard || (o.offered && (o.offered.code || o.offered.id)) || '').toString();
-        const req = (o.requestedCardCode || o.requestedCard || (o.requested && (o.requested.code || o.requested.id)) || '').toString();
+        const of = String(o.offeredCardCode || o.offeredCard || (o.offered && (o.offered.code || o.offered.id)) || o.offeredCode || '').toString();
+        const req = String(o.requestedCardCode || o.requestedCard || (o.requested && (o.request.code || o.request.id)) || o.requestedCode || '').toString();
         const tgt = String(getGroupId(o.toGroup || o.targetGroup || o.to || o.target || o.group || o.receivingGroup) || '');
         return `${of}::${req}::${tgt}`;
       }));
       const toAdd = pendingOutgoing.filter(p => {
-        const key = `${p.offeredCardCode || ''}::${p.requestedCardCode || ''}::${p.targetGroupId || ''}`;
+        const key = `${p.offeredCardCode || p.offeredCard || ''}::${p.requestedCardCode || p.requestedCard || ''}::${p.targetGroupId || ''}`;
         return !existingKeys.has(key);
       });
       merged = filtered.concat(toAdd.map(p => p));
     }
-    renderTradeList(container, filtered, kind);
+
+    renderTradeList(container, merged, kind);
   };
 
   await Promise.all([
@@ -724,7 +773,6 @@ async function loadTrades(force = false) {
     toRender(historyOffers, 'history')
   ]);
 }
-
 async function loadGroups() {
   if (!api.isRemote()) {
     state.allGroups = [];
@@ -742,24 +790,109 @@ async function loadGroups() {
   try { console.info('[groups] loaded', JSON.stringify(state.allGroups)); } catch (e) { console.info('[groups] loaded (unserializable)', state.allGroups); }
   populateTradeSelectors();
 }
-
 async function handleTradeAction(offer, action) {
+  // Normalize id
   const tradeId = offer.id || offer.tradeId || offer.offerId || offer._id;
   if (!tradeId) {
     showToast('Esta oferta no tiene un identificador válido.', { type: 'danger' });
     return;
   }
 
-  try {
-    const result = await api.updateTrade(tradeId, action);
-    if (!result || result.ok === false) {
-      const msg = result && result.error ? result.error : 'No se pudo actualizar la oferta.';
-      throw new Error(msg);
+  // Helper to remove pending local offers by id or by matching tuple
+  function removePendingLocal(idOrOffer) {
+    if (!pendingOutgoing || !pendingOutgoing.length) return;
+    const before = pendingOutgoing.length;
+    pendingOutgoing = pendingOutgoing.filter(p => {
+      if (typeof idOrOffer === 'string') return String(p.id) !== String(idOrOffer);
+      // else idOrOffer is an offer-like object — compare by codes/target
+      const keyP = `${p.offeredCardCode||''}::${p.requestedCardCode||''}::${p.targetGroupId||''}`;
+      const keyO = `${idOrOffer.offeredCardCode||''}::${idOrOffer.requestedCardCode||''}::${idOrOffer.targetGroupId||''}`;
+      return keyP !== keyO;
+    });
+    if (pendingOutgoing.length !== before) {
+      try { api.saveState && api.saveState(state); } catch(e){}
     }
-    showToast(`Oferta ${action === 'accept' ? 'aceptada' : action === 'reject' ? 'rechazada' : 'cancelada'} correctamente.`, { success: true });
+  }
+
+  try {
+    // If this is a locally created pending offer (id starts with local-), handle locally
+    if (String(tradeId).startsWith('local-')) {
+      // remove from pendingOutgoing immediately and refresh UI
+      removePendingLocal(tradeId);
+      showToast('Oferta local cancelada.', { type: 'success' });
+      await loadTrades(true);
+      return;
+    }
+
+    // Optimistically remove rejected/cancelled from UI (so user sees instant effect)
+    if (action === 'reject' || action === 'cancel') {
+      // try remove from incoming/outgoing lists immediately (UI-level)
+      try {
+        // If the offer exists in pendingOutgoing or in lists, remove it quickly
+        removePendingLocal(tradeId);
+        // Also remove from any rendered list nodes: rely on loadTrades afterwards
+      } catch (e) { /* ignore */ }
+    }
+
+    // Attempt primary API call
+    let result = null;
+    let attempted = [];
+
+    // Prefer specialized cancel endpoint if available for cancel action
+    if (action === 'cancel' && typeof api.cancelTrade === 'function') {
+      attempted.push('cancelTrade');
+      result = await api.cancelTrade(tradeId);
+    } else {
+      // Try updateTrade (existing impl)
+      if (typeof api.updateTrade === 'function') {
+        attempted.push('updateTrade(action)');
+        try { result = await api.updateTrade(tradeId, action); } catch(e) { result = e; }
+      }
+    }
+
+    // Fallback: some backends expect a payload object or different action name
+    if ((!result || result.ok === false) && typeof api.updateTrade === 'function' && !attempted.includes('updateTrade(payload)')) {
+      attempted.push('updateTrade(payload)');
+      try {
+        result = await api.updateTrade(tradeId, { action });
+      } catch (e) {
+        result = e;
+      }
+    }
+
+    // Another fallback: if api.cancelTrade exists but we haven't tried it yet
+    if ((!result || result.ok === false) && action === 'cancel' && typeof api.cancelTrade === 'function' && !attempted.includes('cancelTrade')) {
+      attempted.push('cancelTrade-late');
+      try { result = await api.cancelTrade(tradeId); } catch(e) { result = e; }
+    }
+
+    // Normalize response: accept success if result.ok === true or result.success === true
+    const ok = !!(result && (result.ok === true || result.success === true || result.status === 'ok' || result.result));
+
+    if (!ok) {
+      const errMsg = (result && (result.error || result.message)) ? (result.error || result.message) : 'No se pudo actualizar la oferta.';
+      throw new Error(errMsg);
+    }
+
+    // On success remove from pendingOutgoing if present
+    removePendingLocal(tradeId);
+
+    // Show friendly text
+    if (action === 'accept') showToast('Oferta aceptada correctamente.', { type: 'success' });
+    else if (action === 'reject') showToast('Oferta rechazada.', { type: 'success' });
+    else if (action === 'cancel') showToast('Oferta cancelada.', { type: 'success' });
+    else showToast('Acción realizada.', { type: 'success' });
+
+    // Refresh lists from server
     await loadTrades(true);
   } catch (err) {
-    showToast(err && err.message ? err.message : 'No se pudo actualizar la oferta.', { type: 'danger' });
+    // If cancellation failed on server, and offer looked local, we already removed local copy — but report error
+    const msg = err && err.message ? err.message : 'No se pudo actualizar la oferta.';
+    console.error('[trade] handleTradeAction error', msg, err);
+    showToast(msg, { type: 'danger' });
+
+    // Try a UI refresh to keep lists consistent with server
+    try { await loadTrades(true); } catch(e) {}
   }
 }
 
@@ -968,6 +1101,11 @@ async function boot() {
   btnTrades && btnTrades.addEventListener('click', () => { showView('trades-view', btnTrades); loadTrades(true); });
 
   state = await api.getInitialState();
+state.groupInfo = state.groupInfo || state.group || state.myGroup || state.me || state.user || state.account || state.profile || {};
+if (!state.groupInfo || Object.keys(state.groupInfo).length === 0) {
+  if (state.currentUser && state.currentUser.group) state.groupInfo = state.currentUser.group;
+  else if (state.user && state.user.group) state.groupInfo = state.user.group;
+}
 
   await loadGroups();
 
@@ -1095,11 +1233,16 @@ async function updateDesiredSelectForGroup(groupId) {
       return;
     }
     const allGroups = state.allGroups || [];
-    const ownId = getGroupId(state.groupInfo);
-    const groups = allGroups.filter(g => {
-      const gid = getGroupId(g).trim().toLowerCase();
-      return gid && gid !== ownId.trim().toLowerCase();
-    });
+    const ownId = (getGroupId(state.groupInfo) || '').trim().toLowerCase();
+    // filter out self and sort by visible label for stable order
+    const groups = allGroups
+      .filter(g => {
+        const gid = getGroupId(g).trim().toLowerCase();
+        return gid && gid !== ownId;
+      })
+      .sort((a, b) => {
+        return getGroupLabel(a).localeCompare(getGroupLabel(b), undefined, { numeric: true });
+      });
     if (!groups.length) {
       const opt = document.createElement('option');
       opt.value = '';
